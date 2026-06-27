@@ -186,6 +186,9 @@ const orderSchema = new mongoose.Schema(
     address: { type: String, default: "" },
     status: { type: String, default: "Order Placed" },
     paymentStatus: { type: String, default: "Pending" },
+    paymentMethod: { type: String, default: "Cash on Delivery" },
+    paymentReference: { type: String, default: "" },
+    whatsappMessageStatus: { type: String, default: "Not Generated" },
   },
   { timestamps: true }
 );
@@ -260,6 +263,18 @@ function normalizeCoupon(code) {
   return String(code || "").trim().toUpperCase();
 }
 
+function normalizePhone(phone) {
+  const digitsOnly = String(phone || "").replace(/\D/g, "");
+
+  if (!digitsOnly) return "";
+
+  if (digitsOnly.length === 10) {
+    return `91${digitsOnly}`;
+  }
+
+  return digitsOnly;
+}
+
 function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -267,6 +282,50 @@ function escapeRegex(value) {
 async function getNextId(Model) {
   const latestItem = await Model.findOne().sort({ id: -1 }).lean();
   return latestItem && latestItem.id ? latestItem.id + 1 : 1;
+}
+
+function createPaymentReference(orderId) {
+  const randomCode = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `STXN-PAY-${orderId}-${Date.now()}-${randomCode}`;
+}
+
+function buildWhatsAppOrderMessage(order) {
+  const finalAmount = Number(order.finalAmount || order.totalAmount || 0);
+  const discountAmount = Number(order.discountAmount || 0);
+
+  const itemsText =
+    (order.items || [])
+      .map((item) => {
+        const quantity = Number(item.quantity || 1);
+        return `${item.name} x ${quantity}`;
+      })
+      .join(", ") || "StyleNexa products";
+
+  return `Hi ${order.customerName},
+
+Your StyleNexa AI order update is here.
+
+Order ID: #${order.id}
+Items: ${itemsText}
+Order Status: ${order.status}
+Payment Status: ${order.paymentStatus}
+Payment Method: ${order.paymentMethod || "Not updated"}
+Payment Ref: ${order.paymentReference || "Not available"}
+Cart Total: ₹${order.totalAmount || 0}
+Discount: ₹${discountAmount}
+Final Amount: ₹${finalAmount}
+
+Thank you for shopping with StyleNexa AI.`;
+}
+
+function buildWhatsAppLink(phone, message) {
+  const cleanPhone = normalizePhone(phone);
+
+  if (!cleanPhone) {
+    return "";
+  }
+
+  return `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
 }
 
 function buildOutfitRecommendations(products, preferences) {
@@ -628,7 +687,7 @@ app.get("/", (req, res) => {
   res.json({
     message: "StyleNexa AI Backend is running successfully 🚀",
     project: "StyleNexa AI",
-    version: "1.3.0",
+    version: "1.4.0",
     database: "MongoDB Atlas connected",
     geminiConfigured: Boolean(ai),
     aiDemoMode: AI_DEMO_MODE,
@@ -642,6 +701,9 @@ app.get("/", (req, res) => {
       "Customer dashboard",
       "AI Outfit Builder",
       "Complete-the-Look recommendations",
+      "WhatsApp order update generator",
+      "Demo payment flow",
+      "Payment reference tracking",
     ],
   });
 });
@@ -655,7 +717,7 @@ app.get("/api/health", (req, res) => {
     aiDemoMode: AI_DEMO_MODE,
     geminiModel: GEMINI_MODEL,
     adminAuth: "Enabled",
-    version: "1.3.0",
+    version: "1.4.0",
   });
 });
 
@@ -822,6 +884,7 @@ app.post("/api/orders", async (req, res) => {
       totalAmount,
       address,
       couponCode,
+      paymentMethod,
     } = req.body;
 
     if (!customerName || !email || !items || items.length === 0) {
@@ -854,13 +917,24 @@ app.post("/api/orders", async (req, res) => {
       address: address || "",
       status: "Order Placed",
       paymentStatus: "Pending",
+      paymentMethod: paymentMethod || "Cash on Delivery",
+      paymentReference: "",
+      whatsappMessageStatus: "Not Generated",
     });
+
+    const whatsappMessage = buildWhatsAppOrderMessage(newOrder);
+    const whatsappLink = buildWhatsAppLink(newOrder.phone, whatsappMessage);
 
     res.status(201).json({
       success: true,
       message: "Order placed successfully.",
       order: newOrder,
       savings: couponResult.discountAmount,
+      whatsappUpdate: {
+        message: whatsappMessage,
+        link: whatsappLink,
+        phoneAvailable: Boolean(normalizePhone(newOrder.phone)),
+      },
       trackingHint:
         "Use your Order ID and email address to track this order anytime.",
     });
@@ -873,6 +947,191 @@ app.post("/api/orders", async (req, res) => {
     });
   }
 });
+
+app.post("/api/payments/demo", async (req, res) => {
+  try {
+    const { orderId, email, paymentMethod } = req.body;
+
+    if (!orderId || !email) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID and email are required for demo payment.",
+      });
+    }
+
+    const numericOrderId = Number(orderId);
+
+    if (Number.isNaN(numericOrderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID must be a valid number.",
+      });
+    }
+
+    const emailRegex = new RegExp(`^${escapeRegex(normalizeEmail(email))}$`, "i");
+
+    const order = await Order.findOne({
+      id: numericOrderId,
+      email: emailRegex,
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "No order found with this Order ID and email. Payment cannot be simulated.",
+      });
+    }
+
+    if (order.paymentStatus !== "Paid") {
+      order.paymentStatus = "Paid";
+      order.paymentMethod = paymentMethod || "Demo UPI Payment";
+      order.paymentReference =
+        order.paymentReference || createPaymentReference(order.id);
+
+      if (order.status === "Order Placed") {
+        order.status = "Processing";
+      }
+
+      await order.save();
+    }
+
+    const whatsappMessage = buildWhatsAppOrderMessage(order);
+    const whatsappLink = buildWhatsAppLink(order.phone, whatsappMessage);
+
+    res.json({
+      success: true,
+      message: "Demo payment completed successfully.",
+      payment: {
+        orderId: order.id,
+        paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
+        paymentReference: order.paymentReference,
+        finalAmount: order.finalAmount || order.totalAmount,
+      },
+      order,
+      whatsappUpdate: {
+        message: whatsappMessage,
+        link: whatsappLink,
+        phoneAvailable: Boolean(normalizePhone(order.phone)),
+      },
+    });
+  } catch (error) {
+    console.error("Demo payment error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to complete demo payment.",
+    });
+  }
+});
+
+app.get("/api/orders/:id/whatsapp-update", async (req, res) => {
+  try {
+    const orderId = Number(req.params.id);
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required to generate customer WhatsApp update.",
+      });
+    }
+
+    if (Number.isNaN(orderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID must be a valid number.",
+      });
+    }
+
+    const emailRegex = new RegExp(`^${escapeRegex(normalizeEmail(email))}$`, "i");
+
+    const order = await Order.findOne({
+      id: orderId,
+      email: emailRegex,
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    const whatsappMessage = buildWhatsAppOrderMessage(order);
+    const whatsappLink = buildWhatsAppLink(order.phone, whatsappMessage);
+
+    order.whatsappMessageStatus = "Generated";
+    await order.save();
+
+    res.json({
+      success: true,
+      orderId: order.id,
+      phoneAvailable: Boolean(normalizePhone(order.phone)),
+      whatsappMessage,
+      whatsappLink,
+    });
+  } catch (error) {
+    console.error("Customer WhatsApp update error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to generate WhatsApp update.",
+    });
+  }
+});
+
+app.get(
+  "/api/admin/orders/:id/whatsapp-update",
+  authenticateAdmin,
+  async (req, res) => {
+    try {
+      const orderId = Number(req.params.id);
+
+      if (Number.isNaN(orderId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Order ID must be a valid number.",
+        });
+      }
+
+      const order = await Order.findOne({
+        id: orderId,
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found.",
+        });
+      }
+
+      const whatsappMessage = buildWhatsAppOrderMessage(order);
+      const whatsappLink = buildWhatsAppLink(order.phone, whatsappMessage);
+
+      order.whatsappMessageStatus = "Generated";
+      await order.save();
+
+      res.json({
+        success: true,
+        orderId: order.id,
+        customerName: order.customerName,
+        phone: order.phone,
+        phoneAvailable: Boolean(normalizePhone(order.phone)),
+        whatsappMessage,
+        whatsappLink,
+      });
+    } catch (error) {
+      console.error("Admin WhatsApp update error:", error.message);
+
+      res.status(500).json({
+        success: false,
+        message: "Unable to generate admin WhatsApp update.",
+      });
+    }
+  }
+);
 
 app.get("/api/orders/track", async (req, res) => {
   try {
@@ -909,6 +1168,9 @@ app.get("/api/orders/track", async (req, res) => {
       });
     }
 
+    const whatsappMessage = buildWhatsAppOrderMessage(order);
+    const whatsappLink = buildWhatsAppLink(order.phone, whatsappMessage);
+
     res.json({
       success: true,
       order,
@@ -917,6 +1179,8 @@ app.get("/api/orders/track", async (req, res) => {
         customerName: order.customerName,
         status: order.status,
         paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod || "Cash on Delivery",
+        paymentReference: order.paymentReference || "",
         totalAmount: order.totalAmount,
         discountAmount: order.discountAmount || 0,
         finalAmount: order.finalAmount || order.totalAmount,
@@ -924,6 +1188,11 @@ app.get("/api/orders/track", async (req, res) => {
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         timeline: buildOrderTimeline(order.status),
+      },
+      whatsappUpdate: {
+        message: whatsappMessage,
+        link: whatsappLink,
+        phoneAvailable: Boolean(normalizePhone(order.phone)),
       },
     });
   } catch (error) {
@@ -980,6 +1249,10 @@ app.get("/api/customer/dashboard", async (req, res) => {
         )
     ).length;
 
+    const paidOrders = orders.filter(
+      (order) => String(order.paymentStatus || "").toLowerCase() === "paid"
+    ).length;
+
     const recentProducts = await Product.find().sort({ id: 1 }).limit(4).lean();
 
     res.json({
@@ -988,6 +1261,7 @@ app.get("/api/customer/dashboard", async (req, res) => {
         email: cleanEmail,
         totalOrders: orders.length,
         activeOrders,
+        paidOrders,
         totalSpent,
         totalSaved,
         totalReturnRequests: returnRequests.length,
@@ -1067,6 +1341,16 @@ app.get("/api/admin/summary", authenticateAdmin, async (req, res) => {
       0
     );
 
+    const paidRevenue = orders
+      .filter(
+        (order) => String(order.paymentStatus || "").toLowerCase() === "paid"
+      )
+      .reduce(
+        (sum, order) =>
+          sum + Number(order.finalAmount || order.totalAmount || 0),
+        0
+      );
+
     const totalInventory = products.reduce(
       (sum, product) => sum + Number(product.stock || 0),
       0
@@ -1078,6 +1362,7 @@ app.get("/api/admin/summary", authenticateAdmin, async (req, res) => {
         totalProducts: products.length,
         totalOrders: orders.length,
         totalRevenue,
+        paidRevenue,
         totalInventory,
         totalReturnRequests: returnRequests.length,
         pendingReturns: returnRequests.filter(
@@ -1117,6 +1402,16 @@ app.get("/api/admin/analytics", authenticateAdmin, async (req, res) => {
       0
     );
 
+    const paidRevenue = orders
+      .filter(
+        (order) => String(order.paymentStatus || "").toLowerCase() === "paid"
+      )
+      .reduce(
+        (sum, order) =>
+          sum + Number(order.finalAmount || order.totalAmount || 0),
+        0
+      );
+
     const averageOrderValue =
       orders.length > 0 ? Math.round(netRevenue / orders.length) : 0;
 
@@ -1129,6 +1424,12 @@ app.get("/api/admin/analytics", authenticateAdmin, async (req, res) => {
     const paymentCounts = orders.reduce((acc, order) => {
       const status = order.paymentStatus || "Unknown";
       acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    const paymentMethodCounts = orders.reduce((acc, order) => {
+      const method = order.paymentMethod || "Not Updated";
+      acc[method] = (acc[method] || 0) + 1;
       return acc;
     }, {});
 
@@ -1173,17 +1474,20 @@ app.get("/api/admin/analytics", authenticateAdmin, async (req, res) => {
         grossRevenue,
         totalDiscountGiven,
         netRevenue,
+        paidRevenue,
         averageOrderValue,
         totalOrders: orders.length,
         processingOrders: statusCounts.Processing || 0,
         deliveredOrders: statusCounts.Delivered || 0,
         pendingPaymentOrders: paymentCounts.Pending || 0,
+        paidOrders: paymentCounts.Paid || 0,
         totalReturns: returnRequests.length,
         pendingReturns: returnRequests.filter(
           (request) => request.status === "Pending Admin Review"
         ).length,
         statusCounts,
         paymentCounts,
+        paymentMethodCounts,
         couponUsage,
         topProducts,
         lowStockProducts,
@@ -1374,7 +1678,7 @@ app.delete("/api/admin/products/:id", authenticateAdmin, async (req, res) => {
 app.put("/api/admin/orders/:id/status", authenticateAdmin, async (req, res) => {
   try {
     const orderId = Number(req.params.id);
-    const { status, paymentStatus } = req.body;
+    const { status, paymentStatus, paymentMethod } = req.body;
 
     const order = await Order.findOne({ id: orderId });
 
@@ -1391,6 +1695,17 @@ app.put("/api/admin/orders/:id/status", authenticateAdmin, async (req, res) => {
 
     if (paymentStatus) {
       order.paymentStatus = paymentStatus;
+
+      if (
+        paymentStatus === "Paid" &&
+        !order.paymentReference
+      ) {
+        order.paymentReference = createPaymentReference(order.id);
+      }
+    }
+
+    if (paymentMethod) {
+      order.paymentMethod = paymentMethod;
     }
 
     await order.save();
@@ -1700,6 +2015,8 @@ connectDatabase()
       console.log("📊 Admin Analytics: Enabled");
       console.log("🧥 AI Outfit Builder: Enabled");
       console.log("🛍️ Complete-the-Look: Enabled");
+      console.log("💬 WhatsApp Order Updates: Enabled");
+      console.log("💳 Demo Payment Flow: Enabled");
       console.log(
         ai
           ? "✅ Gemini AI configured successfully"
