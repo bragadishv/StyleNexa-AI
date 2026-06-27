@@ -17,16 +17,44 @@ const allowedOrigins = [
   "http://localhost:5175",
   "http://localhost:5176",
   "https://style-nexa-ai.vercel.app",
+  "https://turtlemod.vercel.app",
+  "https://style-nexa-71sodicgu-bragadish-v-s-projects.vercel.app",
   process.env.FRONTEND_URL,
-].filter(Boolean);
+]
+  .filter(Boolean)
+  .flatMap((origin) => origin.split(",").map((item) => item.trim()));
 
 app.use(
   cors({
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    origin: function (origin, callback) {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      const isAllowedOrigin = allowedOrigins.includes(origin);
+
+      const isUserVercelPreview =
+        origin.endsWith(".vercel.app") &&
+        (
+          origin.includes("bragadish-v-s-projects") ||
+          origin.includes("turtlemod") ||
+          origin.includes("style-nexa")
+        );
+
+      if (isAllowedOrigin || isUserVercelPreview) {
+        return callback(null, true);
+      }
+
+      console.log("❌ CORS blocked for origin:", origin);
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+app.options(/.*/, cors());
 
 app.use(express.json());
 
