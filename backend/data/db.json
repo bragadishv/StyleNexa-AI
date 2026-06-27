@@ -1,0 +1,123 @@
+{
+  "products": [
+    {
+      "id": 1,
+      "name": "Oversized Street Tee",
+      "category": "Streetwear",
+      "price": 1299,
+      "oldPrice": 1799,
+      "color": "Black",
+      "sizes": [
+        "S",
+        "M",
+        "L",
+        "XL"
+      ],
+      "stock": 42,
+      "tag": "Best Seller",
+      "description": "A premium oversized streetwear tee designed for comfort, daily wear, and modern fashion styling.",
+      "image": "https://images.unsplash.com/photo-1523398002811-999ca8dec234?auto=format&fit=crop&w=900&q=80"
+    },
+    {
+      "id": 2,
+      "name": "Minimal Cotton Shirt",
+      "category": "Essentials",
+      "price": 1599,
+      "oldPrice": 2199,
+      "color": "White",
+      "sizes": [
+        "M",
+        "L",
+        "XL"
+      ],
+      "stock": 35,
+      "tag": "New Drop",
+      "description": "A clean cotton shirt for premium casual and semi-formal fashion collections.",
+      "image": "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=900&q=80"
+    },
+    {
+      "id": 3,
+      "name": "Urban Cargo Pants",
+      "category": "Bottomwear",
+      "price": 1899,
+      "oldPrice": 2499,
+      "color": "Olive",
+      "sizes": [
+        "S",
+        "M",
+        "L",
+        "XL"
+      ],
+      "stock": 28,
+      "tag": "Trending",
+      "description": "Utility-inspired cargo pants built for streetwear looks, travel outfits, and daily comfort.",
+      "image": "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=80"
+    },
+    {
+      "id": 4,
+      "name": "Premium Hoodie",
+      "category": "Winterwear",
+      "price": 2299,
+      "oldPrice": 2999,
+      "color": "Charcoal",
+      "sizes": [
+        "M",
+        "L",
+        "XL"
+      ],
+      "stock": 22,
+      "tag": "Premium",
+      "description": "A soft premium hoodie created for winter drops, casual outfits, and fashion-forward comfort.",
+      "image": "https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=900&q=80"
+    }
+  ],
+  "orders": [
+    {
+      "id": 1,
+      "customerName": "Bragadish Venkatramanan",
+      "email": "bragadishv@gmail.com",
+      "phone": "7092717154",
+      "items": [
+        {
+          "id": 5,
+          "name": "Regular Fit Grey Cotton Blend Trousers",
+          "category": "Streetwear",
+          "price": 440,
+          "oldPrice": 440,
+          "color": "Black",
+          "sizes": [
+            "S",
+            "M",
+            "L",
+            "XL"
+          ],
+          "stock": 50,
+          "tag": "New Launch",
+          "description": "pant",
+          "image": "https://rukminim2.flixcart.com/image/1536/1536/xif0q/trouser/b/h/4/36-cyfor-f-cyphus-original-imahff5uzqs23wbg.jpeg?q=90",
+          "selectedSize": "L"
+        }
+      ],
+      "totalAmount": 440,
+      "address": "Perumal Koil Street\nwest saidapet",
+      "status": "Packed",
+      "paymentStatus": "Pending",
+      "createdAt": "2026-06-27T05:30:28.487Z"
+    }
+  ],
+  "returnRequests": [
+    {
+      "id": 1,
+      "orderId": "123",
+      "customerName": "Bragadish Venkatramanan",
+      "productName": "Regular Fit Grey Cotton Blend Trousers",
+      "size": "l",
+      "requestType": "Return",
+      "reason": "asd",
+      "status": "Approved",
+      "pickupStatus": "Pickup Scheduled",
+      "refundStatus": "Refund/Exchange Processing",
+      "createdAt": "2026-06-27T05:30:43.825Z"
+    }
+  ]
+}

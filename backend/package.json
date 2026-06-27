@@ -1,0 +1,28 @@
+{
+  "name": "stylenexa-ai-backend",
+  "version": "1.0.0",
+  "description": "Backend API for StyleNexa AI clothing e-commerce platform",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon",
+    "start": "node server.js"
+  },
+  "keywords": [
+    "stylenexa",
+    "ai",
+    "fashion",
+    "ecommerce",
+    "clothing"
+  ],
+  "author": "StyleNexa AI",
+  "license": "ISC",
+  "dependencies": {
+    "@google/genai": "latest",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "mongoose": "^9.7.3",
+    "nodemon": "^3.1.11"
+  }
+}
