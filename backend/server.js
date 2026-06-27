@@ -14,6 +14,7 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
+  "https://style-nexa-ai.vercel.app",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
@@ -183,6 +184,8 @@ const orderSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      lowercase: true,
+      index: true,
     },
     phone: {
       type: String,
@@ -226,6 +229,13 @@ const returnRequestSchema = new mongoose.Schema(
     customerName: {
       type: String,
       required: true,
+    },
+    email: {
+      type: String,
+      default: "",
+      trim: true,
+      lowercase: true,
+      index: true,
     },
     productName: {
       type: String,
@@ -298,9 +308,70 @@ function authenticateAdmin(req, res, next) {
   next();
 }
 
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function getNextId(Model) {
   const latestItem = await Model.findOne().sort({ id: -1 }).lean();
   return latestItem && latestItem.id ? latestItem.id + 1 : 1;
+}
+
+function buildOrderTimeline(status) {
+  const currentStatus = String(status || "Order Placed").toLowerCase();
+
+  const steps = [
+    {
+      key: "order placed",
+      label: "Order Placed",
+      description: "Your order has been received by StyleNexa AI.",
+    },
+    {
+      key: "processing",
+      label: "Processing",
+      description: "Your order is being packed and prepared.",
+    },
+    {
+      key: "shipped",
+      label: "Shipped",
+      description: "Your order has been shipped from our warehouse.",
+    },
+    {
+      key: "out for delivery",
+      label: "Out for Delivery",
+      description: "Your order is on the way to your address.",
+    },
+    {
+      key: "delivered",
+      label: "Delivered",
+      description: "Your order has been delivered successfully.",
+    },
+  ];
+
+  const statusIndexMap = {
+    "order placed": 0,
+    placed: 0,
+    pending: 0,
+    processing: 1,
+    packed: 1,
+    shipped: 2,
+    dispatched: 2,
+    "out for delivery": 3,
+    delivered: 4,
+    completed: 4,
+  };
+
+  const currentIndex = statusIndexMap[currentStatus] ?? 0;
+
+  return steps.map((step, index) => ({
+    ...step,
+    completed: index <= currentIndex,
+    active: index === currentIndex,
+  }));
 }
 
 async function buildProductContext() {
@@ -401,12 +472,18 @@ app.get("/", (req, res) => {
   res.json({
     message: "StyleNexa AI Backend is running successfully 🚀",
     project: "StyleNexa AI",
-    version: "1.0.0",
+    version: "1.1.0",
     database: "MongoDB Atlas connected",
     geminiConfigured: Boolean(ai),
     aiDemoMode: AI_DEMO_MODE,
     geminiModel: GEMINI_MODEL,
     adminAuth: "Enabled",
+    newFeatures: [
+      "Public order tracking",
+      "Customer dashboard",
+      "Customer order history",
+      "Customer return history",
+    ],
   });
 });
 
@@ -419,6 +496,7 @@ app.get("/api/health", (req, res) => {
     aiDemoMode: AI_DEMO_MODE,
     geminiModel: GEMINI_MODEL,
     adminAuth: "Enabled",
+    version: "1.1.0",
   });
 });
 
@@ -509,7 +587,7 @@ app.post("/api/orders", async (req, res) => {
     const newOrder = await Order.create({
       id: await getNextId(Order),
       customerName,
-      email,
+      email: normalizeEmail(email),
       phone: phone || "",
       items,
       totalAmount: Number(totalAmount || 0),
@@ -522,6 +600,8 @@ app.post("/api/orders", async (req, res) => {
       success: true,
       message: "Order placed successfully.",
       order: newOrder,
+      trackingHint:
+        "Use your Order ID and email address to track this order anytime.",
     });
   } catch (error) {
     console.error("Place order error:", error.message);
@@ -533,10 +613,139 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
+app.get("/api/orders/track", async (req, res) => {
+  try {
+    const { orderId, email } = req.query;
+
+    if (!orderId || !email) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID and email are required for tracking.",
+      });
+    }
+
+    const numericOrderId = Number(orderId);
+
+    if (Number.isNaN(numericOrderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID must be a valid number.",
+      });
+    }
+
+    const emailRegex = new RegExp(`^${escapeRegex(normalizeEmail(email))}$`, "i");
+
+    const order = await Order.findOne({
+      id: numericOrderId,
+      email: emailRegex,
+    }).lean();
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "No order found with this Order ID and email. Please check your details.",
+      });
+    }
+
+    res.json({
+      success: true,
+      order,
+      tracking: {
+        orderId: order.id,
+        customerName: order.customerName,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        totalAmount: order.totalAmount,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        timeline: buildOrderTimeline(order.status),
+      },
+    });
+  } catch (error) {
+    console.error("Order tracking error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to track order.",
+    });
+  }
+});
+
+app.get("/api/customer/dashboard", async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required to load customer dashboard.",
+      });
+    }
+
+    const cleanEmail = normalizeEmail(email);
+    const emailRegex = new RegExp(`^${escapeRegex(cleanEmail)}$`, "i");
+
+    const orders = await Order.find({
+      email: emailRegex,
+    })
+      .sort({ id: -1 })
+      .lean();
+
+    const returnRequests = await ReturnRequest.find({
+      email: emailRegex,
+    })
+      .sort({ id: -1 })
+      .lean();
+
+    const totalSpent = orders.reduce(
+      (sum, order) => sum + Number(order.totalAmount || 0),
+      0
+    );
+
+    const activeOrders = orders.filter(
+      (order) =>
+        !["delivered", "completed", "cancelled"].includes(
+          String(order.status || "").toLowerCase()
+        )
+    ).length;
+
+    const recentProducts = await Product.find().sort({ id: 1 }).limit(4).lean();
+
+    res.json({
+      success: true,
+      customer: {
+        email: cleanEmail,
+        totalOrders: orders.length,
+        activeOrders,
+        totalSpent,
+        totalReturnRequests: returnRequests.length,
+      },
+      orders,
+      returnRequests,
+      recommendedProducts: recentProducts,
+    });
+  } catch (error) {
+    console.error("Customer dashboard error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to load customer dashboard.",
+    });
+  }
+});
+
 app.post("/api/returns", async (req, res) => {
   try {
-    const { orderId, customerName, reason, requestType, productName, size } =
-      req.body;
+    const {
+      orderId,
+      customerName,
+      email,
+      reason,
+      requestType,
+      productName,
+      size,
+    } = req.body;
 
     if (!orderId || !customerName || !reason || !requestType) {
       return res.status(400).json({
@@ -550,6 +759,7 @@ app.post("/api/returns", async (req, res) => {
       id: await getNextId(ReturnRequest),
       orderId,
       customerName,
+      email: normalizeEmail(email),
       productName: productName || "",
       size: size || "",
       requestType,
@@ -1018,6 +1228,8 @@ connectDatabase()
       console.log(`👤 Admin Username: ${ADMIN_USERNAME}`);
       console.log(`🤖 AI Demo Mode: ${AI_DEMO_MODE ? "ON" : "OFF"}`);
       console.log(`🧠 Gemini Model: ${GEMINI_MODEL}`);
+      console.log("🧾 Order Tracking: Enabled");
+      console.log("👤 Customer Dashboard: Enabled");
       console.log(
         ai
           ? "✅ Gemini AI configured successfully"
