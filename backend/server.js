@@ -14,6 +14,8 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
+  "http://localhost:5175",
+  "http://localhost:5176",
   "https://style-nexa-ai.vercel.app",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
@@ -267,6 +269,143 @@ async function getNextId(Model) {
   return latestItem && latestItem.id ? latestItem.id + 1 : 1;
 }
 
+function buildOutfitRecommendations(products, preferences) {
+  const occasion = String(preferences.occasion || "").toLowerCase();
+  const stylePreference = String(
+    preferences.stylePreference || ""
+  ).toLowerCase();
+  const colorPreference = String(
+    preferences.colorPreference || ""
+  ).toLowerCase();
+  const budget = Number(preferences.budget || 0);
+
+  const scoredProducts = products.map((product) => {
+    const searchableText = [
+      product.name,
+      product.category,
+      product.color,
+      product.description,
+      product.tag,
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    let score = 0;
+
+    if (stylePreference && searchableText.includes(stylePreference)) score += 4;
+    if (colorPreference && searchableText.includes(colorPreference)) score += 4;
+
+    if (occasion.includes("college") || occasion.includes("casual")) {
+      if (
+        searchableText.includes("tee") ||
+        searchableText.includes("street") ||
+        searchableText.includes("cargo") ||
+        searchableText.includes("hoodie")
+      ) {
+        score += 3;
+      }
+    }
+
+    if (occasion.includes("office") || occasion.includes("meeting")) {
+      if (
+        searchableText.includes("shirt") ||
+        searchableText.includes("minimal") ||
+        searchableText.includes("essentials")
+      ) {
+        score += 3;
+      }
+    }
+
+    if (occasion.includes("travel") || occasion.includes("weekend")) {
+      if (
+        searchableText.includes("cargo") ||
+        searchableText.includes("hoodie") ||
+        searchableText.includes("comfort")
+      ) {
+        score += 3;
+      }
+    }
+
+    if (occasion.includes("party") || occasion.includes("date")) {
+      if (
+        searchableText.includes("premium") ||
+        searchableText.includes("black") ||
+        searchableText.includes("minimal")
+      ) {
+        score += 3;
+      }
+    }
+
+    if (Number(product.stock || 0) > 0) score += 1;
+    if (Number(product.stock || 0) <= 5) score -= 2;
+
+    return {
+      ...product,
+      outfitScore: score,
+    };
+  });
+
+  const sortedProducts = scoredProducts.sort(
+    (a, b) => b.outfitScore - a.outfitScore
+  );
+
+  const selectedProducts = [];
+  let runningTotal = 0;
+
+  for (const product of sortedProducts) {
+    const price = Number(product.price || 0);
+
+    if (
+      budget > 0 &&
+      runningTotal + price > budget &&
+      selectedProducts.length > 0
+    ) {
+      continue;
+    }
+
+    selectedProducts.push(product);
+    runningTotal += price;
+
+    if (selectedProducts.length >= 4) break;
+  }
+
+  const fallbackProducts = products
+    .filter(
+      (product) =>
+        !selectedProducts.some(
+          (selectedProduct) => selectedProduct.id === product.id
+        )
+    )
+    .slice(0, 4 - selectedProducts.length);
+
+  const finalProducts = [...selectedProducts, ...fallbackProducts];
+
+  const totalEstimated = finalProducts.reduce(
+    (sum, product) => sum + Number(product.price || 0),
+    0
+  );
+
+  let outfitName = "Complete StyleNexa Look";
+
+  if (stylePreference.includes("street")) {
+    outfitName = "AI Streetwear Fit";
+  } else if (stylePreference.includes("minimal")) {
+    outfitName = "Minimal Premium Fit";
+  } else if (occasion.includes("office")) {
+    outfitName = "Smart Casual Office Fit";
+  } else if (occasion.includes("travel")) {
+    outfitName = "Travel Comfort Fit";
+  } else if (occasion.includes("party")) {
+    outfitName = "Premium Evening Fit";
+  }
+
+  return {
+    outfitName,
+    totalEstimated,
+    products: finalProducts,
+  };
+}
+
 function calculateCouponDiscount(couponCode, totalAmount) {
   const cleanCode = normalizeCoupon(couponCode);
   const cartTotal = Number(totalAmount || 0);
@@ -398,6 +537,18 @@ function generateDemoReply(prompt) {
   const lowerPrompt = prompt.toLowerCase();
 
   if (
+    lowerPrompt.includes("ai outfit builder") ||
+    lowerPrompt.includes("complete outfit") ||
+    lowerPrompt.includes("complete-the-look")
+  ) {
+    return {
+      success: true,
+      reply:
+        "Here is a complete StyleNexa outfit idea based on your preferences. Start with the main clothing piece, pair it with a matching bottomwear item, and add a layer if you want a more premium styled look. The selected products are chosen from the available catalog so the customer can directly add them to cart.",
+    };
+  }
+
+  if (
     lowerPrompt.includes("product description") ||
     lowerPrompt.includes("fashion e-commerce copywriter")
   ) {
@@ -477,7 +628,7 @@ app.get("/", (req, res) => {
   res.json({
     message: "StyleNexa AI Backend is running successfully 🚀",
     project: "StyleNexa AI",
-    version: "1.2.0",
+    version: "1.3.0",
     database: "MongoDB Atlas connected",
     geminiConfigured: Boolean(ai),
     aiDemoMode: AI_DEMO_MODE,
@@ -489,6 +640,8 @@ app.get("/", (req, res) => {
       "Admin revenue analytics",
       "Order tracking",
       "Customer dashboard",
+      "AI Outfit Builder",
+      "Complete-the-Look recommendations",
     ],
   });
 });
@@ -502,7 +655,7 @@ app.get("/api/health", (req, res) => {
     aiDemoMode: AI_DEMO_MODE,
     geminiModel: GEMINI_MODEL,
     adminAuth: "Enabled",
-    version: "1.2.0",
+    version: "1.3.0",
   });
 });
 
@@ -606,6 +759,55 @@ app.get("/api/products/:id", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Unable to fetch product.",
+    });
+  }
+});
+
+app.get("/api/products/:id/complete-look", async (req, res) => {
+  try {
+    const productId = Number(req.params.id);
+
+    const selectedProduct = await Product.findOne({ id: productId }).lean();
+
+    if (!selectedProduct) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found.",
+      });
+    }
+
+    const allProducts = await Product.find({
+      id: { $ne: productId },
+    })
+      .sort({ id: 1 })
+      .lean();
+
+    const completeLook = buildOutfitRecommendations(
+      [selectedProduct, ...allProducts],
+      {
+        occasion: "Complete-the-look styling",
+        stylePreference: selectedProduct.category,
+        colorPreference: selectedProduct.color,
+        budget: 0,
+      }
+    );
+
+    res.json({
+      success: true,
+      baseProduct: selectedProduct,
+      completeLookProducts: completeLook.products.filter(
+        (product) => product.id !== selectedProduct.id
+      ),
+      totalEstimated: completeLook.totalEstimated,
+      message:
+        "Complete-the-look recommendations generated from available StyleNexa products.",
+    });
+  } catch (error) {
+    console.error("Complete look error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to generate complete-the-look recommendations.",
     });
   }
 });
@@ -1346,6 +1548,98 @@ Keep it professional and useful for an e-commerce website.
   }
 });
 
+app.post("/api/ai/outfit-builder", async (req, res) => {
+  try {
+    const {
+      occasion,
+      stylePreference,
+      colorPreference,
+      budget,
+      sizePreference,
+    } = req.body;
+
+    if (!occasion || !stylePreference) {
+      return res.status(400).json({
+        success: false,
+        message: "Occasion and style preference are required.",
+      });
+    }
+
+    const products = await Product.find().sort({ id: 1 }).lean();
+
+    if (products.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No products available to build an outfit.",
+      });
+    }
+
+    const outfit = buildOutfitRecommendations(products, {
+      occasion,
+      stylePreference,
+      colorPreference,
+      budget,
+    });
+
+    const productContext = outfit.products
+      .map(
+        (product) =>
+          `${product.name} | Category: ${product.category} | Price: ₹${
+            product.price
+          } | Color: ${product.color} | Sizes: ${(product.sizes || []).join(
+            ", "
+          )}`
+      )
+      .join("\n");
+
+    const prompt = `
+You are StyleNexa AI Outfit Builder.
+
+Customer preferences:
+Occasion: ${occasion}
+Style preference: ${stylePreference}
+Color preference: ${colorPreference || "Open to suggestions"}
+Budget: ${budget || "No fixed budget"}
+Size preference: ${sizePreference || "Not specified"}
+
+Recommended products:
+${productContext}
+
+Your task:
+1. Create a complete outfit suggestion using only the recommended products.
+2. Explain why the outfit works.
+3. Mention how the customer can style it.
+4. Keep it premium, practical, and customer-friendly.
+5. Avoid body comments and avoid unrealistic claims.
+
+Reply in 5 to 7 short lines.
+`;
+
+    const result = await generateGeminiReply(prompt);
+
+    res.json({
+      success: true,
+      outfitName: outfit.outfitName,
+      occasion,
+      stylePreference,
+      colorPreference: colorPreference || "",
+      budget: budget || "",
+      sizePreference: sizePreference || "",
+      totalEstimated: outfit.totalEstimated,
+      recommendation: result.reply,
+      products: outfit.products,
+      demoMode: AI_DEMO_MODE,
+    });
+  } catch (error) {
+    console.error("AI outfit builder error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to build outfit recommendation.",
+    });
+  }
+});
+
 app.post("/api/ai/size-guide", async (req, res) => {
   try {
     const { height, weight, preferredFit, productName } = req.body;
@@ -1404,6 +1698,8 @@ connectDatabase()
       console.log("👤 Customer Dashboard: Enabled");
       console.log("🏷️ Coupon System: Enabled");
       console.log("📊 Admin Analytics: Enabled");
+      console.log("🧥 AI Outfit Builder: Enabled");
+      console.log("🛍️ Complete-the-Look: Enabled");
       console.log(
         ai
           ? "✅ Gemini AI configured successfully"
