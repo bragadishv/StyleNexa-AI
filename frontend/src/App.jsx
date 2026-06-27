@@ -19,6 +19,12 @@ const emptyProductForm = {
 
 function App() {
   const [products, setProducts] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [productSearch, setProductSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [sizeFilter, setSizeFilter] = useState("All");
+  const [sortOption, setSortOption] = useState("featured");
+
   const [cart, setCart] = useState([]);
   const [activeSection, setActiveSection] = useState("home");
   const [loading, setLoading] = useState(false);
@@ -93,6 +99,57 @@ function App() {
       ),
     [cart]
   );
+
+  const productCategories = useMemo(() => {
+    return ["All", ...new Set(products.map((product) => product.category))];
+  }, [products]);
+
+  const productSizes = useMemo(() => {
+    const allSizes = products.flatMap((product) => product.sizes || []);
+    return ["All", ...new Set(allSizes)];
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    let filtered = [...products];
+
+    if (productSearch.trim()) {
+      const search = productSearch.toLowerCase();
+
+      filtered = filtered.filter(
+        (product) =>
+          String(product.name || "").toLowerCase().includes(search) ||
+          String(product.category || "").toLowerCase().includes(search) ||
+          String(product.color || "").toLowerCase().includes(search) ||
+          String(product.description || "").toLowerCase().includes(search)
+      );
+    }
+
+    if (categoryFilter !== "All") {
+      filtered = filtered.filter(
+        (product) => product.category === categoryFilter
+      );
+    }
+
+    if (sizeFilter !== "All") {
+      filtered = filtered.filter((product) =>
+        (product.sizes || []).includes(sizeFilter)
+      );
+    }
+
+    if (sortOption === "price-low") {
+      filtered.sort((a, b) => Number(a.price) - Number(b.price));
+    }
+
+    if (sortOption === "price-high") {
+      filtered.sort((a, b) => Number(b.price) - Number(a.price));
+    }
+
+    if (sortOption === "stock-high") {
+      filtered.sort((a, b) => Number(b.stock) - Number(a.stock));
+    }
+
+    return filtered;
+  }, [products, productSearch, categoryFilter, sizeFilter, sortOption]);
 
   const isAdminLoggedIn = Boolean(adminToken);
 
@@ -205,6 +262,29 @@ function App() {
     showMessage(`${product.name} added to cart.`);
   }
 
+  async function openProductDetails(productId) {
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/products/${productId}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setSelectedProduct(data.product);
+      } else {
+        showMessage(data.message || "Product details not found.");
+      }
+    } catch (error) {
+      showMessage("Unable to load product details.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function closeProductDetails() {
+    setSelectedProduct(null);
+  }
+
   function removeFromCart(productId) {
     setCart((currentCart) =>
       currentCart.filter((item) => item.id !== productId)
@@ -260,9 +340,7 @@ function App() {
       );
 
       const data = await response.json();
-      setGeneratedDescription(
-        data.description || "No description generated."
-      );
+      setGeneratedDescription(data.description || "No description generated.");
     } catch (error) {
       setGeneratedDescription("Unable to generate product description.");
     } finally {
@@ -725,14 +803,18 @@ function App() {
             <h1>Premium clothing store with AI shopping intelligence.</h1>
             <p>
               StyleNexa AI combines a modern fashion storefront, AI stylist,
-              MongoDB cloud database, admin operations, order tracking, and
-              customer dashboard in one client-ready platform.
+              MongoDB cloud database, admin operations, order tracking, customer
+              dashboard, product detail views, and smart search in one
+              client-ready platform.
             </p>
             <div className="hero-actions">
               <button onClick={() => scrollToSection("products")}>
                 Shop Collection
               </button>
-              <button className="secondary" onClick={() => scrollToSection("ai-stylist")}>
+              <button
+                className="secondary"
+                onClick={() => scrollToSection("ai-stylist")}
+              >
                 Ask AI Stylist
               </button>
             </div>
@@ -742,8 +824,8 @@ function App() {
             <span>Live Commerce Engine</span>
             <h2>Style. Sell. Track. Scale.</h2>
             <p>
-              Built for fashion brands that want AI-powered shopping, operations,
-              and customer experience.
+              Built for fashion brands that want AI-powered shopping,
+              operations, and customer experience.
             </p>
           </div>
         </section>
@@ -798,8 +880,56 @@ function App() {
             <h2>Live product catalogue</h2>
           </div>
 
+          <div className="product-controls">
+            <input
+              placeholder="Search by product, category, color..."
+              value={productSearch}
+              onChange={(event) => setProductSearch(event.target.value)}
+            />
+
+            <select
+              value={categoryFilter}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+            >
+              {productCategories.map((category) => (
+                <option key={category}>{category}</option>
+              ))}
+            </select>
+
+            <select
+              value={sizeFilter}
+              onChange={(event) => setSizeFilter(event.target.value)}
+            >
+              {productSizes.map((size) => (
+                <option key={size}>{size}</option>
+              ))}
+            </select>
+
+            <select
+              value={sortOption}
+              onChange={(event) => setSortOption(event.target.value)}
+            >
+              <option value="featured">Featured</option>
+              <option value="price-low">Price: Low to High</option>
+              <option value="price-high">Price: High to Low</option>
+              <option value="stock-high">Stock: High to Low</option>
+            </select>
+          </div>
+
+          <div className="filter-summary">
+            Showing <strong>{filteredProducts.length}</strong> of{" "}
+            <strong>{products.length}</strong> products
+          </div>
+
           <div className="product-grid">
-            {products.map((product) => (
+            {filteredProducts.length === 0 && (
+              <div className="empty-state">
+                <h3>No products found</h3>
+                <p>Try changing your search or filter options.</p>
+              </div>
+            )}
+
+            {filteredProducts.map((product) => (
               <article className="product-card" key={product.id}>
                 <div className="product-image-wrap">
                   <img src={product.image} alt={product.name} />
@@ -822,7 +952,14 @@ function App() {
                     <span>{product.stock} in stock</span>
                   </div>
 
-                  <button onClick={() => addToCart(product)}>Add to Cart</button>
+                  <div className="product-actions">
+                    <button onClick={() => openProductDetails(product.id)}>
+                      View Details
+                    </button>
+                    <button onClick={() => addToCart(product)}>
+                      Add to Cart
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -1314,7 +1451,9 @@ function App() {
                         </span>
                       </div>
                       <div className="row-actions">
-                        <button onClick={() => editProduct(product)}>Edit</button>
+                        <button onClick={() => editProduct(product)}>
+                          Edit
+                        </button>
                         <button onClick={() => deleteProduct(product.id)}>
                           Delete
                         </button>
@@ -1537,6 +1676,59 @@ function App() {
           </div>
         </section>
       </main>
+
+      {selectedProduct && (
+        <div className="product-detail-overlay">
+          <div className="product-detail-modal">
+            <button className="close-detail" onClick={closeProductDetails}>
+              ×
+            </button>
+
+            <div className="detail-image">
+              <img src={selectedProduct.image} alt={selectedProduct.name} />
+            </div>
+
+            <div className="detail-content">
+              <p className="eyebrow">{selectedProduct.category}</p>
+              <h2>{selectedProduct.name}</h2>
+              <p>{selectedProduct.description}</p>
+
+              <div className="detail-price">
+                <strong>₹{selectedProduct.price}</strong>
+                {selectedProduct.oldPrice ? (
+                  <span>₹{selectedProduct.oldPrice}</span>
+                ) : null}
+              </div>
+
+              <div className="detail-tags">
+                <span>Color: {selectedProduct.color}</span>
+                <span>Sizes: {(selectedProduct.sizes || []).join(" / ")}</span>
+                <span>Stock: {selectedProduct.stock}</span>
+                <span>{selectedProduct.tag}</span>
+              </div>
+
+              <div className="detail-benefits">
+                <h3>Why customers will like this</h3>
+                <ul>
+                  <li>Premium fashion-friendly product presentation</li>
+                  <li>Clear sizing and stock information</li>
+                  <li>Easy cart conversion from detail view</li>
+                </ul>
+              </div>
+
+              <button
+                className="detail-cart-btn"
+                onClick={() => {
+                  addToCart(selectedProduct);
+                  closeProductDetails();
+                }}
+              >
+                Add to Cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="footer">
         <div>
