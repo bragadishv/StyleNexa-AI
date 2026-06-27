@@ -1,16 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
-const emptyProductForm = {
+const emptyCheckoutForm = {
+  customerName: "",
+  email: "",
+  phone: "",
+  address: "",
+};
+
+const emptyReturnForm = {
+  orderId: "",
+  customerName: "",
+  email: "",
+  productName: "",
+  size: "",
+  requestType: "Return",
+  reason: "",
+};
+
+const emptyNewProductForm = {
   name: "",
   category: "",
   price: "",
   oldPrice: "",
   color: "",
-  sizes: "S, M, L, XL",
+  sizes: "S,M,L,XL",
   stock: "",
   tag: "",
   description: "",
@@ -20,55 +36,21 @@ const emptyProductForm = {
 function App() {
   const [products, setProducts] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [completeLookProducts, setCompleteLookProducts] = useState([]);
+  const [completeLookLoading, setCompleteLookLoading] = useState(false);
+
   const [productSearch, setProductSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [sizeFilter, setSizeFilter] = useState("All");
   const [sortOption, setSortOption] = useState("featured");
 
   const [cart, setCart] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-
-  const [stylistInput, setStylistInput] = useState("");
-  const [stylistReply, setStylistReply] = useState("");
-
-  const [descriptionForm, setDescriptionForm] = useState({
-    productName: "",
-    category: "",
-    color: "",
-    targetAudience: "",
-  });
-  const [generatedDescription, setGeneratedDescription] = useState("");
-
-  const [sizeForm, setSizeForm] = useState({
-    height: "",
-    weight: "",
-    preferredFit: "",
-    productName: "",
-  });
-  const [sizeRecommendation, setSizeRecommendation] = useState("");
-
-  const [checkoutForm, setCheckoutForm] = useState({
-    customerName: "",
-    email: "",
-    phone: "",
-    address: "",
-  });
+  const [checkoutForm, setCheckoutForm] = useState(emptyCheckoutForm);
 
   const [availableCoupons, setAvailableCoupons] = useState([]);
   const [couponCode, setCouponCode] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [couponMessage, setCouponMessage] = useState("");
-
-  const [returnForm, setReturnForm] = useState({
-    orderId: "",
-    customerName: "",
-    email: "",
-    productName: "",
-    size: "",
-    requestType: "Return",
-    reason: "",
-  });
 
   const [trackForm, setTrackForm] = useState({
     orderId: "",
@@ -79,13 +61,40 @@ function App() {
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerDashboard, setCustomerDashboard] = useState(null);
 
+  const [returnForm, setReturnForm] = useState(emptyReturnForm);
+
+  const [stylistMessage, setStylistMessage] = useState("");
+  const [stylistReply, setStylistReply] = useState("");
+
+  const [productAiForm, setProductAiForm] = useState({
+    productName: "",
+    category: "",
+    color: "",
+    targetAudience: "",
+  });
+  const [productAiReply, setProductAiReply] = useState("");
+
+  const [sizeForm, setSizeForm] = useState({
+    height: "",
+    weight: "",
+    preferredFit: "Regular",
+    productName: "",
+  });
+  const [sizeReply, setSizeReply] = useState("");
+
+  const [outfitForm, setOutfitForm] = useState({
+    occasion: "weekend outing",
+    stylePreference: "streetwear",
+    colorPreference: "black",
+    budget: "5000",
+    sizePreference: "L",
+  });
+  const [outfitResult, setOutfitResult] = useState(null);
+
   const [adminToken, setAdminToken] = useState(
     localStorage.getItem("stylenexaAdminToken") || ""
   );
-  const [adminUser, setAdminUser] = useState(
-    localStorage.getItem("stylenexaAdminUser") || ""
-  );
-  const [adminLoginForm, setAdminLoginForm] = useState({
+  const [adminLogin, setAdminLogin] = useState({
     username: "admin",
     password: "admin123",
   });
@@ -93,17 +102,18 @@ function App() {
   const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [adminOrders, setAdminOrders] = useState([]);
   const [adminReturns, setAdminReturns] = useState([]);
-  const [productForm, setProductForm] = useState(emptyProductForm);
-  const [editingProductId, setEditingProductId] = useState(null);
+  const [newProductForm, setNewProductForm] = useState(emptyNewProductForm);
 
-  const cartTotal = useMemo(
-    () =>
-      cart.reduce(
-        (total, item) => total + Number(item.price || 0) * item.quantity,
-        0
-      ),
-    [cart]
-  );
+  const [loading, setLoading] = useState(false);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const cartTotal = useMemo(() => {
+    return cart.reduce(
+      (total, item) => total + Number(item.price || 0) * Number(item.quantity || 1),
+      0
+    );
+  }, [cart]);
 
   const discountAmount = appliedCoupon
     ? Number(appliedCoupon.discountAmount || 0)
@@ -111,81 +121,85 @@ function App() {
 
   const finalCartAmount = Math.max(cartTotal - discountAmount, 0);
 
-  const productCategories = useMemo(() => {
-    return ["All", ...new Set(products.map((product) => product.category))];
+  const categories = useMemo(() => {
+    const uniqueCategories = products
+      .map((product) => product.category)
+      .filter(Boolean);
+    return ["All", ...new Set(uniqueCategories)];
   }, [products]);
 
-  const productSizes = useMemo(() => {
-    const allSizes = products.flatMap((product) => product.sizes || []);
-    return ["All", ...new Set(allSizes)];
+  const sizes = useMemo(() => {
+    const uniqueSizes = products.flatMap((product) => product.sizes || []);
+    return ["All", ...new Set(uniqueSizes)];
   }, [products]);
 
   const filteredProducts = useMemo(() => {
-    let filtered = [...products];
+    let result = [...products];
 
     if (productSearch.trim()) {
-      const search = productSearch.toLowerCase();
+      const search = productSearch.trim().toLowerCase();
 
-      filtered = filtered.filter(
-        (product) =>
-          String(product.name || "").toLowerCase().includes(search) ||
-          String(product.category || "").toLowerCase().includes(search) ||
-          String(product.color || "").toLowerCase().includes(search) ||
-          String(product.description || "").toLowerCase().includes(search)
-      );
+      result = result.filter((product) => {
+        const text = [
+          product.name,
+          product.category,
+          product.color,
+          product.tag,
+          product.description,
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return text.includes(search);
+      });
     }
 
     if (categoryFilter !== "All") {
-      filtered = filtered.filter(
-        (product) => product.category === categoryFilter
-      );
+      result = result.filter((product) => product.category === categoryFilter);
     }
 
     if (sizeFilter !== "All") {
-      filtered = filtered.filter((product) =>
+      result = result.filter((product) =>
         (product.sizes || []).includes(sizeFilter)
       );
     }
 
-    if (sortOption === "price-low") {
-      filtered.sort((a, b) => Number(a.price) - Number(b.price));
+    if (sortOption === "priceLow") {
+      result.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
     }
 
-    if (sortOption === "price-high") {
-      filtered.sort((a, b) => Number(b.price) - Number(a.price));
+    if (sortOption === "priceHigh") {
+      result.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
     }
 
-    if (sortOption === "stock-high") {
-      filtered.sort((a, b) => Number(b.stock) - Number(a.stock));
+    if (sortOption === "stockHigh") {
+      result.sort((a, b) => Number(b.stock || 0) - Number(a.stock || 0));
     }
 
-    return filtered;
+    return result;
   }, [products, productSearch, categoryFilter, sizeFilter, sortOption]);
 
-  const isAdminLoggedIn = Boolean(adminToken);
+  useEffect(() => {
+    fetchProducts();
+    fetchCoupons();
+  }, []);
+
+  useEffect(() => {
+    if (adminToken) {
+      fetchAdminData(adminToken);
+    }
+  }, [adminToken]);
 
   function showMessage(text) {
     setMessage(text);
-    setTimeout(() => setMessage(""), 3500);
+    setTimeout(() => {
+      setMessage("");
+    }, 3500);
   }
 
-  function getAdminHeaders() {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${adminToken}`,
-    };
-  }
-
-  function handleUnauthorizedAdmin() {
-    localStorage.removeItem("stylenexaAdminToken");
-    localStorage.removeItem("stylenexaAdminUser");
-    setAdminToken("");
-    setAdminUser("");
-    setAdminSummary(null);
-    setAdminAnalytics(null);
-    setAdminOrders([]);
-    setAdminReturns([]);
-    showMessage("Admin session expired. Please login again.");
+  function resetCoupon() {
+    setAppliedCoupon(null);
+    setCouponMessage("");
   }
 
   async function fetchProducts() {
@@ -197,7 +211,7 @@ function App() {
         setProducts(data.products || []);
       }
     } catch (error) {
-      showMessage("Unable to load products. Please check backend.");
+      showMessage("Unable to load products. Check backend connection.");
     }
   }
 
@@ -214,68 +228,25 @@ function App() {
     }
   }
 
-  async function fetchAdminData() {
-    if (!adminToken) return;
+  async function openProductDetails(product) {
+    setSelectedProduct(product);
+    setCompleteLookProducts([]);
+    setCompleteLookLoading(true);
 
     try {
-      const [summaryResponse, analyticsResponse, ordersResponse, returnsResponse] =
-        await Promise.all([
-          fetch(`${API_BASE_URL}/api/admin/summary`, {
-            headers: getAdminHeaders(),
-          }),
-          fetch(`${API_BASE_URL}/api/admin/analytics`, {
-            headers: getAdminHeaders(),
-          }),
-          fetch(`${API_BASE_URL}/api/orders`, {
-            headers: getAdminHeaders(),
-          }),
-          fetch(`${API_BASE_URL}/api/returns`, {
-            headers: getAdminHeaders(),
-          }),
-        ]);
+      const response = await fetch(
+        `${API_BASE_URL}/api/products/${product.id}/complete-look`
+      );
+      const data = await response.json();
 
-      if (
-        summaryResponse.status === 401 ||
-        analyticsResponse.status === 401 ||
-        ordersResponse.status === 401 ||
-        returnsResponse.status === 401
-      ) {
-        handleUnauthorizedAdmin();
-        return;
+      if (data.success) {
+        setCompleteLookProducts(data.completeLookProducts || []);
       }
-
-      const summaryData = await summaryResponse.json();
-      const analyticsData = await analyticsResponse.json();
-      const ordersData = await ordersResponse.json();
-      const returnsData = await returnsResponse.json();
-
-      if (summaryData.success) setAdminSummary(summaryData.summary);
-      if (analyticsData.success) setAdminAnalytics(analyticsData.analytics);
-      if (ordersData.success) setAdminOrders(ordersData.orders || []);
-      if (returnsData.success) setAdminReturns(returnsData.requests || []);
     } catch (error) {
-      showMessage("Unable to load admin data.");
+      console.log("Unable to load complete-the-look products.");
+    } finally {
+      setCompleteLookLoading(false);
     }
-  }
-
-  useEffect(() => {
-    fetchProducts();
-    fetchCoupons();
-  }, []);
-
-  useEffect(() => {
-    if (adminToken) {
-      fetchAdminData();
-    }
-  }, [adminToken]);
-
-  function scrollToSection(sectionId) {
-    setTimeout(() => {
-      document.getElementById(sectionId)?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }, 50);
   }
 
   function addToCart(product) {
@@ -285,134 +256,83 @@ function App() {
       if (existingItem) {
         return currentCart.map((item) =>
           item.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
+            ? {
+                ...item,
+                quantity: Number(item.quantity || 1) + 1,
+              }
             : item
         );
       }
 
-      return [...currentCart, { ...product, quantity: 1 }];
+      return [
+        ...currentCart,
+        {
+          ...product,
+          quantity: 1,
+        },
+      ];
     });
 
-    setAppliedCoupon(null);
-    setCouponMessage("");
+    resetCoupon();
     showMessage(`${product.name} added to cart.`);
   }
 
-  async function openProductDetails(productId) {
-    setLoading(true);
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/products/${productId}`);
-      const data = await response.json();
-
-      if (data.success) {
-        setSelectedProduct(data.product);
-      } else {
-        showMessage(data.message || "Product details not found.");
-      }
-    } catch (error) {
-      showMessage("Unable to load product details.");
-    } finally {
-      setLoading(false);
+  function addMultipleToCart(productList) {
+    if (!productList || productList.length === 0) {
+      showMessage("No products available to add.");
+      return;
     }
+
+    productList.forEach((product) => {
+      setCart((currentCart) => {
+        const existingItem = currentCart.find((item) => item.id === product.id);
+
+        if (existingItem) {
+          return currentCart.map((item) =>
+            item.id === product.id
+              ? {
+                  ...item,
+                  quantity: Number(item.quantity || 1) + 1,
+                }
+              : item
+          );
+        }
+
+        return [
+          ...currentCart,
+          {
+            ...product,
+            quantity: 1,
+          },
+        ];
+      });
+    });
+
+    resetCoupon();
+    showMessage("Recommended outfit products added to cart.");
   }
 
-  function closeProductDetails() {
-    setSelectedProduct(null);
+  function updateCartQuantity(productId, quantity) {
+    const cleanQuantity = Math.max(Number(quantity || 1), 1);
+
+    setCart((currentCart) =>
+      currentCart.map((item) =>
+        item.id === productId
+          ? {
+              ...item,
+              quantity: cleanQuantity,
+            }
+          : item
+      )
+    );
+
+    resetCoupon();
   }
 
   function removeFromCart(productId) {
-    setCart((currentCart) =>
-      currentCart.filter((item) => item.id !== productId)
-    );
-    setAppliedCoupon(null);
-    setCouponMessage("");
-  }
-
-  async function askStylist() {
-    if (!stylistInput.trim()) {
-      showMessage("Please type your fashion question.");
-      return;
-    }
-
-    setLoading(true);
-    setStylistReply("");
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/ai/stylist`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message: stylistInput }),
-      });
-
-      const data = await response.json();
-      setStylistReply(data.reply || "No AI response received.");
-    } catch (error) {
-      setStylistReply("Unable to connect to AI stylist.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function generateDescription() {
-    if (!descriptionForm.productName || !descriptionForm.category) {
-      showMessage("Product name and category are required.");
-      return;
-    }
-
-    setLoading(true);
-    setGeneratedDescription("");
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/ai/product-description`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(descriptionForm),
-        }
-      );
-
-      const data = await response.json();
-      setGeneratedDescription(data.description || "No description generated.");
-    } catch (error) {
-      setGeneratedDescription("Unable to generate product description.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function generateSizeGuide() {
-    if (!sizeForm.height || !sizeForm.weight || !sizeForm.preferredFit) {
-      showMessage("Height, weight, and preferred fit are required.");
-      return;
-    }
-
-    setLoading(true);
-    setSizeRecommendation("");
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/ai/size-guide`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(sizeForm),
-      });
-
-      const data = await response.json();
-      setSizeRecommendation(
-        data.recommendation || "No size recommendation received."
-      );
-    } catch (error) {
-      setSizeRecommendation("Unable to generate size recommendation.");
-    } finally {
-      setLoading(false);
-    }
+    setCart((currentCart) => currentCart.filter((item) => item.id !== productId));
+    resetCoupon();
+    showMessage("Product removed from cart.");
   }
 
   async function applyCoupon() {
@@ -443,6 +363,13 @@ function App() {
 
       const data = await response.json();
 
+      if (!response.ok) {
+        setAppliedCoupon(null);
+        setCouponMessage(data.message || "Coupon could not be applied.");
+        showMessage(data.message || "Coupon could not be applied.");
+        return;
+      }
+
       if (data.success) {
         setAppliedCoupon(data);
         setCouponMessage(data.message);
@@ -454,23 +381,14 @@ function App() {
       }
     } catch (error) {
       setAppliedCoupon(null);
-      setCouponMessage("Unable to apply coupon.");
-      showMessage("Unable to apply coupon.");
+      setCouponMessage("Unable to apply coupon. Check backend URL or CORS.");
+      showMessage("Unable to apply coupon. Check backend URL or CORS.");
     } finally {
       setLoading(false);
     }
   }
 
-  function removeCoupon() {
-    setCouponCode("");
-    setAppliedCoupon(null);
-    setCouponMessage("");
-    showMessage("Coupon removed.");
-  }
-
-  async function placeOrder(event) {
-    event.preventDefault();
-
+  async function placeOrder() {
     if (cart.length === 0) {
       showMessage("Cart is empty.");
       return;
@@ -493,50 +411,105 @@ function App() {
           ...checkoutForm,
           items: cart,
           totalAmount: cartTotal,
-          couponCode: appliedCoupon ? appliedCoupon.couponCode : "",
+          couponCode: appliedCoupon?.couponCode || "",
         }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        setCart([]);
-        setCouponCode("");
-        setAppliedCoupon(null);
-        setCouponMessage("");
-        setCheckoutForm({
-          customerName: "",
-          email: "",
-          phone: "",
-          address: "",
-        });
+        showMessage(
+          `Order placed successfully. Order ID: ${data.order.id}. Saved ₹${
+            data.savings || 0
+          }.`
+        );
+
         setTrackForm({
           orderId: String(data.order.id),
-          email: data.order.email,
+          email: checkoutForm.email,
         });
-        showMessage(
-          `Order placed successfully. Your Order ID is ${data.order.id}.`
-        );
+
+        setCart([]);
+        resetCoupon();
+        setCouponCode("");
+        setCheckoutForm(emptyCheckoutForm);
+        fetchAdminData(adminToken);
       } else {
         showMessage(data.message || "Unable to place order.");
       }
     } catch (error) {
-      showMessage("Unable to place order.");
+      showMessage("Unable to place order. Check backend connection.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function submitReturnRequest(event) {
-    event.preventDefault();
+  async function trackOrder() {
+    if (!trackForm.orderId || !trackForm.email) {
+      showMessage("Order ID and email are required.");
+      return;
+    }
 
-    if (
-      !returnForm.orderId ||
-      !returnForm.customerName ||
-      !returnForm.reason ||
-      !returnForm.requestType
-    ) {
-      showMessage("Please fill all required return/exchange fields.");
+    setLoading(true);
+    setTrackedOrder(null);
+
+    try {
+      const params = new URLSearchParams({
+        orderId: trackForm.orderId,
+        email: trackForm.email,
+      });
+
+      const response = await fetch(`${API_BASE_URL}/api/orders/track?${params}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setTrackedOrder(data);
+        showMessage("Order tracking loaded.");
+      } else {
+        showMessage(data.message || "Order not found.");
+      }
+    } catch (error) {
+      showMessage("Unable to track order.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadCustomerDashboard() {
+    if (!customerEmail) {
+      showMessage("Enter email to load customer dashboard.");
+      return;
+    }
+
+    setLoading(true);
+    setCustomerDashboard(null);
+
+    try {
+      const params = new URLSearchParams({
+        email: customerEmail,
+      });
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/customer/dashboard?${params}`
+      );
+      const data = await response.json();
+
+      if (data.success) {
+        setCustomerDashboard(data);
+        showMessage("Customer dashboard loaded.");
+      } else {
+        showMessage(data.message || "Unable to load dashboard.");
+      }
+    } catch (error) {
+      showMessage("Unable to load customer dashboard.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitReturnRequest() {
+    if (!returnForm.orderId || !returnForm.customerName || !returnForm.reason) {
+      showMessage("Order ID, customer name, and reason are required.");
       return;
     }
 
@@ -554,16 +527,9 @@ function App() {
       const data = await response.json();
 
       if (data.success) {
-        setReturnForm({
-          orderId: "",
-          customerName: "",
-          email: "",
-          productName: "",
-          size: "",
-          requestType: "Return",
-          reason: "",
-        });
-        showMessage("Return/exchange request submitted successfully.");
+        showMessage("Return/exchange request submitted.");
+        setReturnForm(emptyReturnForm);
+        fetchAdminData(adminToken);
       } else {
         showMessage(data.message || "Unable to submit request.");
       }
@@ -574,84 +540,139 @@ function App() {
     }
   }
 
-  async function trackOrder(event) {
-    event.preventDefault();
-
-    if (!trackForm.orderId || !trackForm.email) {
-      showMessage("Order ID and email are required.");
+  async function askStylist() {
+    if (!stylistMessage.trim()) {
+      showMessage("Enter a fashion question first.");
       return;
     }
 
     setLoading(true);
-    setTrackedOrder(null);
+    setStylistReply("");
 
     try {
-      const params = new URLSearchParams({
-        orderId: trackForm.orderId,
-        email: trackForm.email,
+      const response = await fetch(`${API_BASE_URL}/api/ai/stylist`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: stylistMessage,
+        }),
       });
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/orders/track?${params.toString()}`
-      );
       const data = await response.json();
 
       if (data.success) {
-        setTrackedOrder(data);
-        showMessage("Order found successfully.");
+        setStylistReply(data.reply);
       } else {
-        showMessage(data.message || "No order found.");
+        setStylistReply(data.reply || "Unable to generate stylist response.");
       }
     } catch (error) {
-      showMessage("Unable to track order.");
+      setStylistReply("Unable to reach AI stylist.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadCustomerDashboard(event) {
-    event.preventDefault();
-
-    if (!customerEmail.trim()) {
-      showMessage("Please enter customer email.");
+  async function generateProductDescription() {
+    if (!productAiForm.productName || !productAiForm.category) {
+      showMessage("Product name and category are required.");
       return;
     }
 
     setLoading(true);
-    setCustomerDashboard(null);
+    setProductAiReply("");
 
     try {
-      const params = new URLSearchParams({
-        email: customerEmail,
+      const response = await fetch(`${API_BASE_URL}/api/ai/product-description`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(productAiForm),
       });
 
-      const response = await fetch(
-        `${API_BASE_URL}/api/customer/dashboard?${params.toString()}`
-      );
       const data = await response.json();
 
       if (data.success) {
-        setCustomerDashboard(data);
-        showMessage("Customer dashboard loaded.");
+        setProductAiReply(data.description);
       } else {
-        showMessage(data.message || "Unable to load customer dashboard.");
+        setProductAiReply(data.description || "Unable to generate description.");
       }
     } catch (error) {
-      showMessage("Unable to load customer dashboard.");
+      setProductAiReply("Unable to reach product description AI.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function loginAdmin(event) {
-    event.preventDefault();
-
-    if (!adminLoginForm.username || !adminLoginForm.password) {
-      showMessage("Enter admin username and password.");
+  async function generateSizeGuide() {
+    if (!sizeForm.height || !sizeForm.weight || !sizeForm.preferredFit) {
+      showMessage("Height, weight, and fit preference are required.");
       return;
     }
 
     setLoading(true);
+    setSizeReply("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ai/size-guide`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(sizeForm),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSizeReply(data.recommendation);
+      } else {
+        setSizeReply(data.recommendation || "Unable to generate size guide.");
+      }
+    } catch (error) {
+      setSizeReply("Unable to reach AI size guide.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateOutfit() {
+    if (!outfitForm.occasion || !outfitForm.stylePreference) {
+      showMessage("Occasion and style preference are required.");
+      return;
+    }
+
+    setLoading(true);
+    setOutfitResult(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/ai/outfit-builder`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(outfitForm),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setOutfitResult(data);
+        showMessage("AI outfit generated.");
+      } else {
+        showMessage(data.message || "Unable to generate outfit.");
+      }
+    } catch (error) {
+      showMessage("Unable to reach AI outfit builder.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function adminLoginSubmit() {
+    setAdminLoading(true);
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/login`, {
@@ -659,7 +680,7 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(adminLoginForm),
+        body: JSON.stringify(adminLogin),
       });
 
       const data = await response.json();
@@ -668,23 +689,22 @@ function App() {
         localStorage.setItem("stylenexaAdminToken", data.token);
         localStorage.setItem("stylenexaAdminUser", data.admin.username);
         setAdminToken(data.token);
-        setAdminUser(data.admin.username);
         showMessage("Admin login successful.");
+        fetchAdminData(data.token);
       } else {
         showMessage(data.message || "Invalid admin login.");
       }
     } catch (error) {
       showMessage("Unable to login admin.");
     } finally {
-      setLoading(false);
+      setAdminLoading(false);
     }
   }
 
-  function logoutAdmin() {
+  function adminLogout() {
     localStorage.removeItem("stylenexaAdminToken");
     localStorage.removeItem("stylenexaAdminUser");
     setAdminToken("");
-    setAdminUser("");
     setAdminSummary(null);
     setAdminAnalytics(null);
     setAdminOrders([]);
@@ -692,293 +712,257 @@ function App() {
     showMessage("Admin logged out.");
   }
 
-  async function saveProduct(event) {
-    event.preventDefault();
+  async function fetchAdminData(token = adminToken) {
+    if (!token) return;
 
+    setAdminLoading(true);
+
+    try {
+      const headers = {
+        Authorization: `Bearer ${token}`,
+      };
+
+      const [summaryRes, analyticsRes, ordersRes, returnsRes] =
+        await Promise.all([
+          fetch(`${API_BASE_URL}/api/admin/summary`, { headers }),
+          fetch(`${API_BASE_URL}/api/admin/analytics`, { headers }),
+          fetch(`${API_BASE_URL}/api/orders`, { headers }),
+          fetch(`${API_BASE_URL}/api/returns`, { headers }),
+        ]);
+
+      const summaryData = await summaryRes.json();
+      const analyticsData = await analyticsRes.json();
+      const ordersData = await ordersRes.json();
+      const returnsData = await returnsRes.json();
+
+      if (summaryData.success) {
+        setAdminSummary(summaryData.summary);
+      }
+
+      if (analyticsData.success) {
+        setAdminAnalytics(analyticsData.analytics);
+      }
+
+      if (ordersData.success) {
+        setAdminOrders(ordersData.orders || []);
+      }
+
+      if (returnsData.success) {
+        setAdminReturns(returnsData.requests || []);
+      }
+    } catch (error) {
+      showMessage("Unable to load admin data.");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function addAdminProduct() {
     if (
-      !productForm.name ||
-      !productForm.category ||
-      !productForm.price ||
-      !productForm.color ||
-      !productForm.description
+      !newProductForm.name ||
+      !newProductForm.category ||
+      !newProductForm.price ||
+      !newProductForm.color ||
+      !newProductForm.description
     ) {
-      showMessage("Please fill required product fields.");
+      showMessage("Fill product name, category, price, color, and description.");
       return;
     }
 
-    const url = editingProductId
-      ? `${API_BASE_URL}/api/admin/products/${editingProductId}`
-      : `${API_BASE_URL}/api/admin/products`;
-
-    const method = editingProductId ? "PUT" : "POST";
-
-    setLoading(true);
+    setAdminLoading(true);
 
     try {
-      const response = await fetch(url, {
-        method,
-        headers: getAdminHeaders(),
-        body: JSON.stringify(productForm),
+      const response = await fetch(`${API_BASE_URL}/api/admin/products`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify(newProductForm),
       });
-
-      if (response.status === 401) {
-        handleUnauthorizedAdmin();
-        return;
-      }
 
       const data = await response.json();
 
       if (data.success) {
-        setProductForm(emptyProductForm);
-        setEditingProductId(null);
-        await fetchProducts();
-        await fetchAdminData();
-        showMessage(
-          editingProductId
-            ? "Product updated successfully."
-            : "Product added successfully."
-        );
+        showMessage("Product added successfully.");
+        setNewProductForm(emptyNewProductForm);
+        fetchProducts();
+        fetchAdminData(adminToken);
       } else {
-        showMessage(data.message || "Unable to save product.");
+        showMessage(data.message || "Unable to add product.");
       }
     } catch (error) {
-      showMessage("Unable to save product.");
+      showMessage("Unable to add product.");
     } finally {
-      setLoading(false);
+      setAdminLoading(false);
     }
   }
 
-  function editProduct(product) {
-    setEditingProductId(product.id);
-    setProductForm({
-      name: product.name || "",
-      category: product.category || "",
-      price: product.price || "",
-      oldPrice: product.oldPrice || "",
-      color: product.color || "",
-      sizes: (product.sizes || []).join(", "),
-      stock: product.stock || "",
-      tag: product.tag || "",
-      description: product.description || "",
-      image: product.image || "",
-    });
-    scrollToSection("admin");
-  }
-
-  async function deleteProduct(productId) {
-    const confirmDelete = window.confirm(
-      "Are you sure you want to delete this product?"
-    );
-
+  async function deleteAdminProduct(productId) {
+    const confirmDelete = window.confirm("Delete this product?");
     if (!confirmDelete) return;
 
-    setLoading(true);
+    setAdminLoading(true);
 
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/admin/products/${productId}`,
         {
           method: "DELETE",
-          headers: getAdminHeaders(),
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+          },
         }
       );
-
-      if (response.status === 401) {
-        handleUnauthorizedAdmin();
-        return;
-      }
 
       const data = await response.json();
 
       if (data.success) {
-        await fetchProducts();
-        await fetchAdminData();
-        showMessage("Product deleted successfully.");
+        showMessage("Product deleted.");
+        fetchProducts();
+        fetchAdminData(adminToken);
       } else {
         showMessage(data.message || "Unable to delete product.");
       }
     } catch (error) {
       showMessage("Unable to delete product.");
     } finally {
-      setLoading(false);
+      setAdminLoading(false);
     }
   }
 
-  async function updateOrderStatus(orderId, status) {
+  async function updateOrderStatus(orderId, status, paymentStatus) {
+    setAdminLoading(true);
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/admin/orders/${orderId}/status`,
         {
           method: "PUT",
-          headers: getAdminHeaders(),
-          body: JSON.stringify({ status }),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            status,
+            paymentStatus,
+          }),
         }
       );
-
-      if (response.status === 401) {
-        handleUnauthorizedAdmin();
-        return;
-      }
 
       const data = await response.json();
 
       if (data.success) {
-        await fetchAdminData();
         showMessage("Order status updated.");
+        fetchAdminData(adminToken);
+      } else {
+        showMessage(data.message || "Unable to update order.");
       }
     } catch (error) {
-      showMessage("Unable to update order status.");
+      showMessage("Unable to update order.");
+    } finally {
+      setAdminLoading(false);
     }
   }
 
-  async function updateReturnStatus(requestId, status) {
+  async function updateReturnStatus(requestId, status, pickupStatus, refundStatus) {
+    setAdminLoading(true);
+
     try {
       const response = await fetch(
         `${API_BASE_URL}/api/admin/returns/${requestId}/status`,
         {
           method: "PUT",
-          headers: getAdminHeaders(),
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
           body: JSON.stringify({
             status,
-            pickupStatus:
-              status === "Approved" ? "Pickup Scheduled" : "Not Scheduled",
-            refundStatus:
-              status === "Approved" ? "Refund In Progress" : "Not Started",
+            pickupStatus,
+            refundStatus,
           }),
         }
       );
 
-      if (response.status === 401) {
-        handleUnauthorizedAdmin();
-        return;
-      }
-
       const data = await response.json();
 
       if (data.success) {
-        await fetchAdminData();
         showMessage("Return/exchange status updated.");
+        fetchAdminData(adminToken);
+      } else {
+        showMessage(data.message || "Unable to update return request.");
       }
     } catch (error) {
-      showMessage("Unable to update return status.");
+      showMessage("Unable to update return request.");
+    } finally {
+      setAdminLoading(false);
     }
   }
 
   return (
-    <div className="app">
-      {message && <div className="toast">{message}</div>}
+    <div className="app-shell">
+      {message && <div className="toast-message">{message}</div>}
 
-      <nav className="navbar">
-        <button className="brand" onClick={() => scrollToSection("home")}>
-          <span>StyleNexa</span>
-          <strong>AI</strong>
-        </button>
-
-        <div className="nav-links">
-          <button onClick={() => scrollToSection("collections")}>
-            Collections
-          </button>
-          <button onClick={() => scrollToSection("products")}>Products</button>
-          <button onClick={() => scrollToSection("ai-stylist")}>
-            AI Stylist
-          </button>
-          <button onClick={() => scrollToSection("customer")}>
-            Track Order
-          </button>
-          <button onClick={() => scrollToSection("admin")}>Admin</button>
-          <button onClick={() => scrollToSection("checkout")}>
-            Cart ({cart.length})
-          </button>
+      <header className="site-header">
+        <div>
+          <p className="eyebrow">AI Fashion Commerce Platform</p>
+          <h1>StyleNexa AI</h1>
         </div>
-      </nav>
+
+        <nav>
+          <a href="#shop">Shop</a>
+          <a href="#outfit-builder">AI Outfit</a>
+          <a href="#cart">Cart</a>
+          <a href="#tracking">Track</a>
+          <a href="#admin">Admin</a>
+        </nav>
+      </header>
 
       <main>
-        <section id="home" className="hero">
+        <section className="hero-section">
           <div className="hero-content">
-            <p className="eyebrow">AI Fashion Commerce Platform</p>
-            <h1>Premium clothing store with AI shopping intelligence.</h1>
+            <p className="eyebrow">Premium clothing store with AI shopping intelligence</p>
+            <h2>Build fashion looks, manage orders, and sell smarter with AI.</h2>
             <p>
-              StyleNexa AI combines a modern fashion storefront, AI stylist,
-              MongoDB cloud database, admin operations, order tracking, coupon
-              discounts, customer dashboard, product detail views, and revenue
-              analytics in one client-ready platform.
+              StyleNexa AI combines a premium streetwear storefront, smart
+              product discovery, coupons, order tracking, returns, admin
+              analytics, AI styling, and complete-the-look recommendations.
             </p>
+
             <div className="hero-actions">
-              <button onClick={() => scrollToSection("products")}>
-                Shop Collection
-              </button>
-              <button
-                className="secondary"
-                onClick={() => scrollToSection("ai-stylist")}
-              >
-                Ask AI Stylist
-              </button>
+              <a href="#shop" className="primary-link">
+                Explore Products
+              </a>
+              <a href="#outfit-builder" className="secondary-link">
+                Generate AI Outfit
+              </a>
             </div>
           </div>
 
           <div className="hero-card">
-            <span>Live Commerce Engine</span>
-            <h2>Style. Sell. Track. Scale.</h2>
-            <p>
-              Built for fashion brands that want AI-powered shopping,
-              operations, discounts, and customer experience.
-            </p>
+            <span>Live Features</span>
+            <h3>Phase 2D Active</h3>
+            <ul>
+              <li>AI Outfit Builder</li>
+              <li>Complete-the-Look</li>
+              <li>Coupon Checkout</li>
+              <li>Admin Revenue Analytics</li>
+            </ul>
           </div>
         </section>
 
-        <section className="stats-section">
-          <div>
-            <strong>{products.length}+</strong>
-            <span>Products</span>
-          </div>
-          <div>
-            <strong>AI</strong>
-            <span>Stylist Assistant</span>
-          </div>
-          <div>
-            <strong>Coupons</strong>
-            <span>Discount Engine</span>
-          </div>
-          <div>
-            <strong>Admin</strong>
-            <span>Revenue Analytics</span>
-          </div>
-        </section>
-
-        <section id="collections" className="section-block">
+        <section id="shop" className="section-block">
           <div className="section-heading">
-            <p className="eyebrow">Collections</p>
-            <h2>Fashion drops built for modern customers.</h2>
+            <p className="eyebrow">Smart Catalog</p>
+            <h2>Shop Collection</h2>
+            <p>Search, filter, open product details, and build looks instantly.</p>
           </div>
 
-          <div className="collection-grid">
-            <article>
-              <span>01</span>
-              <h3>Streetwear</h3>
-              <p>Oversized silhouettes, cargos, hoodies, and bold essentials.</p>
-            </article>
-            <article>
-              <span>02</span>
-              <h3>Essentials</h3>
-              <p>Clean daily wear for premium casual and semi-formal looks.</p>
-            </article>
-            <article>
-              <span>03</span>
-              <h3>AI Styling</h3>
-              <p>Customers can ask AI for product suggestions and outfit ideas.</p>
-            </article>
-          </div>
-        </section>
-
-        <section id="products" className="section-block">
-          <div className="section-heading">
-            <p className="eyebrow">Shop</p>
-            <h2>Live product catalogue</h2>
-          </div>
-
-          <div className="product-controls">
+          <div className="filter-panel">
             <input
-              placeholder="Search by product, category, color..."
+              type="text"
+              placeholder="Search product, color, tag..."
               value={productSearch}
               onChange={(event) => setProductSearch(event.target.value)}
             />
@@ -987,8 +971,10 @@ function App() {
               value={categoryFilter}
               onChange={(event) => setCategoryFilter(event.target.value)}
             >
-              {productCategories.map((category) => (
-                <option key={category}>{category}</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
               ))}
             </select>
 
@@ -996,8 +982,10 @@ function App() {
               value={sizeFilter}
               onChange={(event) => setSizeFilter(event.target.value)}
             >
-              {productSizes.map((size) => (
-                <option key={size}>{size}</option>
+              {sizes.map((size) => (
+                <option key={size} value={size}>
+                  Size {size}
+                </option>
               ))}
             </select>
 
@@ -1006,25 +994,13 @@ function App() {
               onChange={(event) => setSortOption(event.target.value)}
             >
               <option value="featured">Featured</option>
-              <option value="price-low">Price: Low to High</option>
-              <option value="price-high">Price: High to Low</option>
-              <option value="stock-high">Stock: High to Low</option>
+              <option value="priceLow">Price: Low to High</option>
+              <option value="priceHigh">Price: High to Low</option>
+              <option value="stockHigh">Stock: High to Low</option>
             </select>
           </div>
 
-          <div className="filter-summary">
-            Showing <strong>{filteredProducts.length}</strong> of{" "}
-            <strong>{products.length}</strong> products
-          </div>
-
           <div className="product-grid">
-            {filteredProducts.length === 0 && (
-              <div className="empty-state">
-                <h3>No products found</h3>
-                <p>Try changing your search or filter options.</p>
-              </div>
-            )}
-
             {filteredProducts.map((product) => (
               <article className="product-card" key={product.id}>
                 <div className="product-image-wrap">
@@ -1032,28 +1008,31 @@ function App() {
                   <span>{product.tag}</span>
                 </div>
 
-                <div className="product-info">
-                  <p>{product.category}</p>
+                <div className="product-card-body">
+                  <p className="product-category">{product.category}</p>
                   <h3>{product.name}</h3>
-                  <p className="product-description">{product.description}</p>
-
-                  <div className="price-row">
-                    <strong>₹{product.price}</strong>
-                    {product.oldPrice ? <span>₹{product.oldPrice}</span> : null}
-                  </div>
+                  <p>{product.description}</p>
 
                   <div className="product-meta">
                     <span>{product.color}</span>
                     <span>{(product.sizes || []).join(" / ")}</span>
-                    <span>{product.stock} in stock</span>
+                    <span>{product.stock} left</span>
                   </div>
 
-                  <div className="product-actions">
-                    <button onClick={() => openProductDetails(product.id)}>
-                      View Details
-                    </button>
-                    <button onClick={() => addToCart(product)}>
-                      Add to Cart
+                  <div className="price-row">
+                    <strong>₹{product.price}</strong>
+                    {Number(product.oldPrice || 0) > Number(product.price || 0) && (
+                      <del>₹{product.oldPrice}</del>
+                    )}
+                  </div>
+
+                  <div className="button-row">
+                    <button onClick={() => addToCart(product)}>Add to Cart</button>
+                    <button
+                      className="outline-button"
+                      onClick={() => openProductDetails(product)}
+                    >
+                      Details
                     </button>
                   </div>
                 </div>
@@ -1062,94 +1041,476 @@ function App() {
           </div>
         </section>
 
-        <section id="ai-stylist" className="section-block ai-section">
+        <section id="outfit-builder" className="section-block dark-section">
           <div className="section-heading">
-            <p className="eyebrow">AI Shopping Assistant</p>
-            <h2>Ask StyleNexa AI for outfit ideas.</h2>
+            <p className="eyebrow">Phase 2D</p>
+            <h2>AI Outfit Builder</h2>
+            <p>
+              Customers can enter an occasion, style, color, budget, and size.
+              StyleNexa AI recommends a complete outfit from the catalog.
+            </p>
           </div>
 
-          <div className="ai-tools-grid">
-            <article className="chat-card">
+          <div className="ai-outfit-layout">
+            <div className="form-card">
+              <label>
+                Occasion
+                <input
+                  type="text"
+                  value={outfitForm.occasion}
+                  onChange={(event) =>
+                    setOutfitForm({
+                      ...outfitForm,
+                      occasion: event.target.value,
+                    })
+                  }
+                  placeholder="weekend outing, office, party..."
+                />
+              </label>
+
+              <label>
+                Style Preference
+                <input
+                  type="text"
+                  value={outfitForm.stylePreference}
+                  onChange={(event) =>
+                    setOutfitForm({
+                      ...outfitForm,
+                      stylePreference: event.target.value,
+                    })
+                  }
+                  placeholder="streetwear, minimal, premium..."
+                />
+              </label>
+
+              <label>
+                Color Preference
+                <input
+                  type="text"
+                  value={outfitForm.colorPreference}
+                  onChange={(event) =>
+                    setOutfitForm({
+                      ...outfitForm,
+                      colorPreference: event.target.value,
+                    })
+                  }
+                  placeholder="black, white, olive..."
+                />
+              </label>
+
+              <label>
+                Budget
+                <input
+                  type="number"
+                  value={outfitForm.budget}
+                  onChange={(event) =>
+                    setOutfitForm({
+                      ...outfitForm,
+                      budget: event.target.value,
+                    })
+                  }
+                  placeholder="5000"
+                />
+              </label>
+
+              <label>
+                Size Preference
+                <select
+                  value={outfitForm.sizePreference}
+                  onChange={(event) =>
+                    setOutfitForm({
+                      ...outfitForm,
+                      sizePreference: event.target.value,
+                    })
+                  }
+                >
+                  <option value="S">S</option>
+                  <option value="M">M</option>
+                  <option value="L">L</option>
+                  <option value="XL">XL</option>
+                </select>
+              </label>
+
+              <button onClick={generateOutfit} disabled={loading}>
+                {loading ? "Generating..." : "Generate AI Outfit"}
+              </button>
+            </div>
+
+            <div className="outfit-result-card">
+              {!outfitResult ? (
+                <div className="empty-state">
+                  <h3>Your AI outfit will appear here</h3>
+                  <p>
+                    Try weekend outing + streetwear + black + ₹5000 + size L.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="eyebrow">AI Recommendation</p>
+                  <h3>{outfitResult.outfitName}</h3>
+                  <p className="ai-reply">{outfitResult.recommendation}</p>
+
+                  <div className="summary-grid">
+                    <div>
+                      <span>Occasion</span>
+                      <strong>{outfitResult.occasion}</strong>
+                    </div>
+                    <div>
+                      <span>Style</span>
+                      <strong>{outfitResult.stylePreference}</strong>
+                    </div>
+                    <div>
+                      <span>Estimated Total</span>
+                      <strong>₹{outfitResult.totalEstimated}</strong>
+                    </div>
+                    <div>
+                      <span>Mode</span>
+                      <strong>{outfitResult.demoMode ? "Demo AI" : "Gemini AI"}</strong>
+                    </div>
+                  </div>
+
+                  <button
+                    className="full-width-button"
+                    onClick={() => addMultipleToCart(outfitResult.products)}
+                  >
+                    Add Full Outfit to Cart
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {outfitResult?.products?.length > 0 && (
+            <div className="mini-product-grid">
+              {outfitResult.products.map((product) => (
+                <article className="mini-product-card" key={product.id}>
+                  <img src={product.image} alt={product.name} />
+                  <div>
+                    <p>{product.category}</p>
+                    <h4>{product.name}</h4>
+                    <strong>₹{product.price}</strong>
+                    <button onClick={() => addToCart(product)}>Add Item</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section id="cart" className="section-block">
+          <div className="section-heading">
+            <p className="eyebrow">Checkout</p>
+            <h2>Cart, Coupons & Order</h2>
+            <p>Apply coupons and place discounted orders.</p>
+          </div>
+
+          <div className="cart-layout">
+            <div className="cart-card">
+              <h3>Cart Items</h3>
+
+              {cart.length === 0 ? (
+                <p className="muted">Cart is empty.</p>
+              ) : (
+                cart.map((item) => (
+                  <div className="cart-item" key={item.id}>
+                    <img src={item.image} alt={item.name} />
+                    <div>
+                      <h4>{item.name}</h4>
+                      <p>₹{item.price}</p>
+                      <input
+                        type="number"
+                        min="1"
+                        value={item.quantity}
+                        onChange={(event) =>
+                          updateCartQuantity(item.id, event.target.value)
+                        }
+                      />
+                    </div>
+                    <button
+                      className="danger-button"
+                      onClick={() => removeFromCart(item.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
+
+              <div className="coupon-box">
+                <h4>Available Coupons</h4>
+                <div className="coupon-list">
+                  {availableCoupons.map((coupon) => (
+                    <button
+                      key={coupon.code}
+                      className="coupon-chip"
+                      onClick={() => setCouponCode(coupon.code)}
+                    >
+                      <strong>{coupon.code}</strong>
+                      <span>Min ₹{coupon.minCartValue}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="coupon-input-row">
+                  <input
+                    type="text"
+                    value={couponCode}
+                    onChange={(event) => setCouponCode(event.target.value)}
+                    placeholder="Enter coupon code"
+                  />
+                  <button onClick={applyCoupon} disabled={loading}>
+                    Apply
+                  </button>
+                </div>
+
+                {couponMessage && <p className="coupon-message">{couponMessage}</p>}
+              </div>
+            </div>
+
+            <div className="checkout-card">
+              <h3>Order Summary</h3>
+
+              <div className="amount-row">
+                <span>Cart Total</span>
+                <strong>₹{cartTotal}</strong>
+              </div>
+
+              <div className="amount-row discount">
+                <span>Discount</span>
+                <strong>- ₹{discountAmount}</strong>
+              </div>
+
+              <div className="amount-row final">
+                <span>Final Payable</span>
+                <strong>₹{finalCartAmount}</strong>
+              </div>
+
+              <label>
+                Customer Name
+                <input
+                  type="text"
+                  value={checkoutForm.customerName}
+                  onChange={(event) =>
+                    setCheckoutForm({
+                      ...checkoutForm,
+                      customerName: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={checkoutForm.email}
+                  onChange={(event) =>
+                    setCheckoutForm({
+                      ...checkoutForm,
+                      email: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Phone
+                <input
+                  type="text"
+                  value={checkoutForm.phone}
+                  onChange={(event) =>
+                    setCheckoutForm({
+                      ...checkoutForm,
+                      phone: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Address
+                <textarea
+                  value={checkoutForm.address}
+                  onChange={(event) =>
+                    setCheckoutForm({
+                      ...checkoutForm,
+                      address: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <button onClick={placeOrder} disabled={loading}>
+                {loading ? "Processing..." : "Place Order"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section id="tracking" className="section-block split-section">
+          <div>
+            <div className="section-heading left-heading">
+              <p className="eyebrow">Customer</p>
+              <h2>Track Order</h2>
+            </div>
+
+            <div className="form-card">
+              <label>
+                Order ID
+                <input
+                  type="text"
+                  value={trackForm.orderId}
+                  onChange={(event) =>
+                    setTrackForm({
+                      ...trackForm,
+                      orderId: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={trackForm.email}
+                  onChange={(event) =>
+                    setTrackForm({
+                      ...trackForm,
+                      email: event.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <button onClick={trackOrder}>Track Order</button>
+            </div>
+
+            {trackedOrder && (
+              <div className="result-card">
+                <h3>Order #{trackedOrder.order.id}</h3>
+                <p>Status: {trackedOrder.tracking.status}</p>
+                <p>Payment: {trackedOrder.tracking.paymentStatus}</p>
+                <p>Coupon: {trackedOrder.tracking.couponCode || "No Coupon"}</p>
+                <p>Discount: ₹{trackedOrder.tracking.discountAmount || 0}</p>
+                <p>Final Amount: ₹{trackedOrder.tracking.finalAmount}</p>
+
+                <div className="timeline">
+                  {trackedOrder.tracking.timeline.map((step) => (
+                    <div
+                      key={step.key}
+                      className={`timeline-step ${
+                        step.completed ? "completed" : ""
+                      } ${step.active ? "active" : ""}`}
+                    >
+                      <span></span>
+                      <div>
+                        <strong>{step.label}</strong>
+                        <p>{step.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="section-heading left-heading">
+              <p className="eyebrow">Dashboard</p>
+              <h2>Customer Dashboard</h2>
+            </div>
+
+            <div className="form-card">
+              <label>
+                Customer Email
+                <input
+                  type="email"
+                  value={customerEmail}
+                  onChange={(event) => setCustomerEmail(event.target.value)}
+                />
+              </label>
+
+              <button onClick={loadCustomerDashboard}>Load Dashboard</button>
+            </div>
+
+            {customerDashboard && (
+              <div className="result-card">
+                <div className="summary-grid">
+                  <div>
+                    <span>Total Orders</span>
+                    <strong>{customerDashboard.customer.totalOrders}</strong>
+                  </div>
+                  <div>
+                    <span>Active Orders</span>
+                    <strong>{customerDashboard.customer.activeOrders}</strong>
+                  </div>
+                  <div>
+                    <span>Total Spent</span>
+                    <strong>₹{customerDashboard.customer.totalSpent}</strong>
+                  </div>
+                  <div>
+                    <span>Total Saved</span>
+                    <strong>₹{customerDashboard.customer.totalSaved}</strong>
+                  </div>
+                </div>
+
+                <h4>Recent Orders</h4>
+                {customerDashboard.orders.slice(0, 5).map((order) => (
+                  <div className="compact-row" key={order.id}>
+                    <span>#{order.id}</span>
+                    <span>{order.status}</span>
+                    <strong>₹{order.finalAmount || order.totalAmount}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="section-block dark-section">
+          <div className="section-heading">
+            <p className="eyebrow">AI Studio</p>
+            <h2>Stylist, Size Guide & Product Copy</h2>
+          </div>
+
+          <div className="three-column-grid">
+            <div className="form-card">
               <h3>AI Stylist</h3>
               <textarea
-                value={stylistInput}
-                onChange={(event) => setStylistInput(event.target.value)}
-                placeholder="Example: I need a black streetwear outfit for weekend..."
+                value={stylistMessage}
+                onChange={(event) => setStylistMessage(event.target.value)}
+                placeholder="Suggest an outfit for college..."
               />
-              <button onClick={askStylist} disabled={loading}>
-                {loading ? "Thinking..." : "Ask Stylist"}
-              </button>
-              {stylistReply && <div className="result-box">{stylistReply}</div>}
-            </article>
+              <button onClick={askStylist}>Ask Stylist</button>
+              {stylistReply && <p className="ai-reply">{stylistReply}</p>}
+            </div>
 
-            <article className="tool-panel">
-              <h3>AI Product Description</h3>
-              <input
-                placeholder="Product name"
-                value={descriptionForm.productName}
-                onChange={(event) =>
-                  setDescriptionForm({
-                    ...descriptionForm,
-                    productName: event.target.value,
-                  })
-                }
-              />
-              <input
-                placeholder="Category"
-                value={descriptionForm.category}
-                onChange={(event) =>
-                  setDescriptionForm({
-                    ...descriptionForm,
-                    category: event.target.value,
-                  })
-                }
-              />
-              <input
-                placeholder="Color"
-                value={descriptionForm.color}
-                onChange={(event) =>
-                  setDescriptionForm({
-                    ...descriptionForm,
-                    color: event.target.value,
-                  })
-                }
-              />
-              <input
-                placeholder="Target audience"
-                value={descriptionForm.targetAudience}
-                onChange={(event) =>
-                  setDescriptionForm({
-                    ...descriptionForm,
-                    targetAudience: event.target.value,
-                  })
-                }
-              />
-              <button onClick={generateDescription} disabled={loading}>
-                Generate Copy
-              </button>
-              {generatedDescription && (
-                <div className="result-box">{generatedDescription}</div>
-              )}
-            </article>
-
-            <article className="tool-panel">
+            <div className="form-card">
               <h3>AI Size Guide</h3>
               <input
-                placeholder="Height, example: 175 cm"
+                type="text"
+                placeholder="Height"
                 value={sizeForm.height}
                 onChange={(event) =>
-                  setSizeForm({ ...sizeForm, height: event.target.value })
+                  setSizeForm({
+                    ...sizeForm,
+                    height: event.target.value,
+                  })
                 }
               />
               <input
-                placeholder="Weight, example: 70 kg"
+                type="text"
+                placeholder="Weight"
                 value={sizeForm.weight}
                 onChange={(event) =>
-                  setSizeForm({ ...sizeForm, weight: event.target.value })
+                  setSizeForm({
+                    ...sizeForm,
+                    weight: event.target.value,
+                  })
                 }
               />
-              <input
-                placeholder="Preferred fit: regular / relaxed / oversized"
+              <select
                 value={sizeForm.preferredFit}
                 onChange={(event) =>
                   setSizeForm({
@@ -1157,8 +1518,14 @@ function App() {
                     preferredFit: event.target.value,
                   })
                 }
-              />
+              >
+                <option value="Slim">Slim</option>
+                <option value="Regular">Regular</option>
+                <option value="Relaxed">Relaxed</option>
+                <option value="Oversized">Oversized</option>
+              </select>
               <input
+                type="text"
                 placeholder="Product name"
                 value={sizeForm.productName}
                 onChange={(event) =>
@@ -1168,249 +1535,239 @@ function App() {
                   })
                 }
               />
-              <button onClick={generateSizeGuide} disabled={loading}>
-                Recommend Size
+              <button onClick={generateSizeGuide}>Generate Size Guide</button>
+              {sizeReply && <p className="ai-reply">{sizeReply}</p>}
+            </div>
+
+            <div className="form-card">
+              <h3>Product Description AI</h3>
+              <input
+                type="text"
+                placeholder="Product name"
+                value={productAiForm.productName}
+                onChange={(event) =>
+                  setProductAiForm({
+                    ...productAiForm,
+                    productName: event.target.value,
+                  })
+                }
+              />
+              <input
+                type="text"
+                placeholder="Category"
+                value={productAiForm.category}
+                onChange={(event) =>
+                  setProductAiForm({
+                    ...productAiForm,
+                    category: event.target.value,
+                  })
+                }
+              />
+              <input
+                type="text"
+                placeholder="Color"
+                value={productAiForm.color}
+                onChange={(event) =>
+                  setProductAiForm({
+                    ...productAiForm,
+                    color: event.target.value,
+                  })
+                }
+              />
+              <input
+                type="text"
+                placeholder="Target audience"
+                value={productAiForm.targetAudience}
+                onChange={(event) =>
+                  setProductAiForm({
+                    ...productAiForm,
+                    targetAudience: event.target.value,
+                  })
+                }
+              />
+              <button onClick={generateProductDescription}>
+                Generate Copy
               </button>
-              {sizeRecommendation && (
-                <div className="result-box">{sizeRecommendation}</div>
-              )}
-            </article>
+              {productAiReply && <p className="ai-reply">{productAiReply}</p>}
+            </div>
           </div>
         </section>
 
-        <section id="customer" className="section-block customer-section">
+        <section className="section-block">
           <div className="section-heading">
-            <p className="eyebrow">Customer Experience</p>
-            <h2>Track orders and view customer dashboard.</h2>
+            <p className="eyebrow">Post Purchase</p>
+            <h2>Return / Exchange Request</h2>
           </div>
 
-          <div className="customer-grid">
-            <article className="customer-card">
-              <h3>Track Your Order</h3>
-              <p>
-                Enter your Order ID and email to view live order status and
-                timeline.
-              </p>
-
-              <form onSubmit={trackOrder} className="form-grid">
+          <div className="form-card wide-form">
+            <div className="form-grid">
+              <label>
+                Order ID
                 <input
-                  placeholder="Order ID"
-                  value={trackForm.orderId}
+                  type="text"
+                  value={returnForm.orderId}
                   onChange={(event) =>
-                    setTrackForm({ ...trackForm, orderId: event.target.value })
+                    setReturnForm({
+                      ...returnForm,
+                      orderId: event.target.value,
+                    })
                   }
                 />
+              </label>
+
+              <label>
+                Customer Name
                 <input
-                  placeholder="Email used during checkout"
-                  value={trackForm.email}
+                  type="text"
+                  value={returnForm.customerName}
                   onChange={(event) =>
-                    setTrackForm({ ...trackForm, email: event.target.value })
+                    setReturnForm({
+                      ...returnForm,
+                      customerName: event.target.value,
+                    })
                   }
                 />
-                <button type="submit" disabled={loading}>
-                  Track Order
-                </button>
-              </form>
+              </label>
 
-              {trackedOrder && (
-                <div className="tracking-result">
-                  <div className="tracking-header">
-                    <div>
-                      <span>Order ID</span>
-                      <strong>#{trackedOrder.order.id}</strong>
-                    </div>
-                    <div>
-                      <span>Status</span>
-                      <strong>{trackedOrder.order.status}</strong>
-                    </div>
-                    <div>
-                      <span>Payable</span>
-                      <strong>
-                        ₹
-                        {trackedOrder.order.finalAmount ||
-                          trackedOrder.order.totalAmount}
-                      </strong>
-                    </div>
-                  </div>
-
-                  {(trackedOrder.order.discountAmount || 0) > 0 && (
-                    <div className="order-discount-note">
-                      Coupon {trackedOrder.order.couponCode} saved ₹
-                      {trackedOrder.order.discountAmount}
-                    </div>
-                  )}
-
-                  <div className="timeline">
-                    {trackedOrder.tracking.timeline.map((step) => (
-                      <div
-                        key={step.key}
-                        className={`timeline-step ${
-                          step.completed ? "completed" : ""
-                        } ${step.active ? "active" : ""}`}
-                      >
-                        <span></span>
-                        <div>
-                          <strong>{step.label}</strong>
-                          <p>{step.description}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mini-list">
-                    {(trackedOrder.order.items || []).map((item) => (
-                      <div key={`${item.id}-${item.name}`}>
-                        <span>{item.name}</span>
-                        <strong>
-                          {item.quantity} × ₹{item.price}
-                        </strong>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </article>
-
-            <article className="customer-card">
-              <h3>Customer Dashboard</h3>
-              <p>
-                View customer order history, spending summary, returns, and
-                product recommendations.
-              </p>
-
-              <form onSubmit={loadCustomerDashboard} className="form-grid">
+              <label>
+                Email
                 <input
-                  placeholder="Customer email"
-                  value={customerEmail}
-                  onChange={(event) => setCustomerEmail(event.target.value)}
+                  type="email"
+                  value={returnForm.email}
+                  onChange={(event) =>
+                    setReturnForm({
+                      ...returnForm,
+                      email: event.target.value,
+                    })
+                  }
                 />
-                <button type="submit" disabled={loading}>
-                  Load Dashboard
-                </button>
-              </form>
+              </label>
 
-              {customerDashboard && (
-                <div className="dashboard-preview">
-                  <div className="dashboard-grid compact">
-                    <div>
-                      <span>Total Orders</span>
-                      <strong>{customerDashboard.customer.totalOrders}</strong>
-                    </div>
-                    <div>
-                      <span>Active Orders</span>
-                      <strong>{customerDashboard.customer.activeOrders}</strong>
-                    </div>
-                    <div>
-                      <span>Total Spent</span>
-                      <strong>₹{customerDashboard.customer.totalSpent}</strong>
-                    </div>
-                    <div>
-                      <span>Total Saved</span>
-                      <strong>₹{customerDashboard.customer.totalSaved || 0}</strong>
-                    </div>
-                  </div>
+              <label>
+                Product Name
+                <input
+                  type="text"
+                  value={returnForm.productName}
+                  onChange={(event) =>
+                    setReturnForm({
+                      ...returnForm,
+                      productName: event.target.value,
+                    })
+                  }
+                />
+              </label>
 
-                  <h4>Recent Orders</h4>
-                  <div className="mini-list">
-                    {customerDashboard.orders.length === 0 && (
-                      <p>No orders found for this email.</p>
-                    )}
-                    {customerDashboard.orders.slice(0, 5).map((order) => (
-                      <div key={order.id}>
-                        <span>
-                          #{order.id} — {order.status}
-                        </span>
-                        <strong>
-                          ₹{order.finalAmount || order.totalAmount}
-                        </strong>
-                      </div>
-                    ))}
-                  </div>
+              <label>
+                Size
+                <input
+                  type="text"
+                  value={returnForm.size}
+                  onChange={(event) =>
+                    setReturnForm({
+                      ...returnForm,
+                      size: event.target.value,
+                    })
+                  }
+                />
+              </label>
 
-                  <h4>Return Requests</h4>
-                  <div className="mini-list">
-                    {customerDashboard.returnRequests.length === 0 && (
-                      <p>No return requests found.</p>
-                    )}
-                    {customerDashboard.returnRequests
-                      .slice(0, 5)
-                      .map((request) => (
-                        <div key={request.id}>
-                          <span>
-                            #{request.id} — {request.requestType}
-                          </span>
-                          <strong>{request.status}</strong>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </article>
+              <label>
+                Request Type
+                <select
+                  value={returnForm.requestType}
+                  onChange={(event) =>
+                    setReturnForm({
+                      ...returnForm,
+                      requestType: event.target.value,
+                    })
+                  }
+                >
+                  <option value="Return">Return</option>
+                  <option value="Exchange">Exchange</option>
+                  <option value="Refund">Refund</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              Reason
+              <textarea
+                value={returnForm.reason}
+                onChange={(event) =>
+                  setReturnForm({
+                    ...returnForm,
+                    reason: event.target.value,
+                  })
+                }
+              />
+            </label>
+
+            <button onClick={submitReturnRequest}>Submit Request</button>
           </div>
         </section>
 
         <section id="admin" className="section-block admin-section">
           <div className="section-heading">
-            <p className="eyebrow">Admin Operations</p>
-            <h2>Manage products, orders, returns, and revenue.</h2>
+            <p className="eyebrow">Business Panel</p>
+            <h2>Admin Dashboard</h2>
+            <p>Manage inventory, orders, returns, coupons, and revenue analytics.</p>
           </div>
 
-          {!isAdminLoggedIn ? (
-            <div className="admin-login-card">
-              <div>
-                <h3>Protected admin dashboard</h3>
-                <p>
-                  Login to manage inventory, orders, return approvals, revenue
-                  summary, coupons, and product analytics.
-                </p>
+          {!adminToken ? (
+            <div className="form-card admin-login-card">
+              <h3>Admin Login</h3>
 
-                <div className="demo-credentials">
-                  <span>Demo Username: admin</span>
-                  <span>Demo Password: admin123</span>
-                </div>
-              </div>
-
-              <form onSubmit={loginAdmin} className="admin-login-form">
+              <label>
+                Username
                 <input
-                  placeholder="Username"
-                  value={adminLoginForm.username}
+                  type="text"
+                  value={adminLogin.username}
                   onChange={(event) =>
-                    setAdminLoginForm({
-                      ...adminLoginForm,
+                    setAdminLogin({
+                      ...adminLogin,
                       username: event.target.value,
                     })
                   }
                 />
+              </label>
+
+              <label>
+                Password
                 <input
                   type="password"
-                  placeholder="Password"
-                  value={adminLoginForm.password}
+                  value={adminLogin.password}
                   onChange={(event) =>
-                    setAdminLoginForm({
-                      ...adminLoginForm,
+                    setAdminLogin({
+                      ...adminLogin,
                       password: event.target.value,
                     })
                   }
                 />
-                <button type="submit" disabled={loading}>
-                  Login Admin
-                </button>
-              </form>
+              </label>
+
+              <button onClick={adminLoginSubmit} disabled={adminLoading}>
+                Login
+              </button>
             </div>
           ) : (
-            <div className="admin-management">
+            <div className="admin-dashboard">
               <div className="admin-topbar">
-                <div className="admin-welcome">
-                  <span>Logged in as</span>
-                  <strong>{adminUser || "admin"}</strong>
+                <h3>StyleNexa Admin</h3>
+                <div>
+                  <button
+                    className="outline-button"
+                    onClick={() => fetchAdminData(adminToken)}
+                  >
+                    Refresh
+                  </button>
+                  <button className="danger-button" onClick={adminLogout}>
+                    Logout
+                  </button>
                 </div>
-                <button className="logout-btn" onClick={logoutAdmin}>
-                  Logout
-                </button>
               </div>
 
               {adminSummary && (
-                <div className="dashboard-grid">
+                <div className="summary-grid admin-summary-grid">
                   <div>
                     <span>Products</span>
                     <strong>{adminSummary.totalProducts}</strong>
@@ -1424,6 +1781,14 @@ function App() {
                     <strong>₹{adminSummary.totalRevenue}</strong>
                   </div>
                   <div>
+                    <span>Inventory</span>
+                    <strong>{adminSummary.totalInventory}</strong>
+                  </div>
+                  <div>
+                    <span>Returns</span>
+                    <strong>{adminSummary.totalReturnRequests}</strong>
+                  </div>
+                  <div>
                     <span>Pending Returns</span>
                     <strong>{adminSummary.pendingReturns}</strong>
                   </div>
@@ -1434,7 +1799,7 @@ function App() {
                 <div className="analytics-panel">
                   <h3>Revenue Analytics</h3>
 
-                  <div className="dashboard-grid">
+                  <div className="summary-grid">
                     <div>
                       <span>Gross Revenue</span>
                       <strong>₹{adminAnalytics.grossRevenue}</strong>
@@ -1448,540 +1813,409 @@ function App() {
                       <strong>₹{adminAnalytics.netRevenue}</strong>
                     </div>
                     <div>
-                      <span>Avg Order Value</span>
+                      <span>Average Order</span>
                       <strong>₹{adminAnalytics.averageOrderValue}</strong>
                     </div>
                   </div>
 
                   <div className="analytics-grid">
-                    <article>
-                      <h4>Order Status</h4>
-                      {Object.entries(adminAnalytics.statusCounts || {}).map(
-                        ([key, value]) => (
-                          <div className="analytics-row" key={key}>
-                            <span>{key}</span>
-                            <strong>{value}</strong>
-                          </div>
-                        )
-                      )}
-                    </article>
-
-                    <article>
+                    <div>
                       <h4>Coupon Usage</h4>
                       {Object.entries(adminAnalytics.couponUsage || {}).map(
-                        ([key, value]) => (
-                          <div className="analytics-row" key={key}>
-                            <span>{key}</span>
-                            <strong>{value}</strong>
+                        ([code, count]) => (
+                          <div className="compact-row" key={code}>
+                            <span>{code}</span>
+                            <strong>{count}</strong>
                           </div>
                         )
                       )}
-                    </article>
+                    </div>
 
-                    <article>
+                    <div>
                       <h4>Top Products</h4>
-                      {(adminAnalytics.topProducts || []).length === 0 && (
-                        <p>No product sales yet.</p>
-                      )}
                       {(adminAnalytics.topProducts || []).map((product) => (
-                        <div
-                          className="analytics-row"
-                          key={product.productName}
-                        >
+                        <div className="compact-row" key={product.productName}>
                           <span>{product.productName}</span>
                           <strong>{product.quantitySold}</strong>
                         </div>
                       ))}
-                    </article>
+                    </div>
 
-                    <article>
+                    <div>
                       <h4>Low Stock Alerts</h4>
-                      {(adminAnalytics.lowStockProducts || []).length === 0 && (
-                        <p>No low stock products.</p>
+                      {(adminAnalytics.lowStockProducts || []).length === 0 ? (
+                        <p className="muted">No low stock products.</p>
+                      ) : (
+                        adminAnalytics.lowStockProducts.map((product) => (
+                          <div className="compact-row" key={product.id}>
+                            <span>{product.name}</span>
+                            <strong>{product.stock}</strong>
+                          </div>
+                        ))
                       )}
-                      {(adminAnalytics.lowStockProducts || []).map((product) => (
-                        <div className="analytics-row" key={product.id}>
-                          <span>{product.name}</span>
-                          <strong>{product.stock}</strong>
-                        </div>
-                      ))}
-                    </article>
+                    </div>
                   </div>
                 </div>
               )}
 
-              <form onSubmit={saveProduct} className="admin-form">
-                <h3>{editingProductId ? "Edit Product" : "Add Product"}</h3>
+              <div className="admin-grid">
+                <div className="form-card">
+                  <h3>Add Product</h3>
 
-                <input
-                  placeholder="Product name"
-                  value={productForm.name}
-                  onChange={(event) =>
-                    setProductForm({ ...productForm, name: event.target.value })
-                  }
-                />
-                <input
-                  placeholder="Category"
-                  value={productForm.category}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      category: event.target.value,
-                    })
-                  }
-                />
-                <input
-                  placeholder="Price"
-                  value={productForm.price}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      price: event.target.value,
-                    })
-                  }
-                />
-                <input
-                  placeholder="Old price"
-                  value={productForm.oldPrice}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      oldPrice: event.target.value,
-                    })
-                  }
-                />
-                <input
-                  placeholder="Color"
-                  value={productForm.color}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      color: event.target.value,
-                    })
-                  }
-                />
-                <input
-                  placeholder="Sizes"
-                  value={productForm.sizes}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      sizes: event.target.value,
-                    })
-                  }
-                />
-                <input
-                  placeholder="Stock"
-                  value={productForm.stock}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      stock: event.target.value,
-                    })
-                  }
-                />
-                <input
-                  placeholder="Tag"
-                  value={productForm.tag}
-                  onChange={(event) =>
-                    setProductForm({ ...productForm, tag: event.target.value })
-                  }
-                />
-                <input
-                  placeholder="Image URL"
-                  value={productForm.image}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      image: event.target.value,
-                    })
-                  }
-                />
-                <textarea
-                  placeholder="Description"
-                  value={productForm.description}
-                  onChange={(event) =>
-                    setProductForm({
-                      ...productForm,
-                      description: event.target.value,
-                    })
-                  }
-                />
+                  <input
+                    type="text"
+                    placeholder="Name"
+                    value={newProductForm.name}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        name: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    placeholder="Category"
+                    value={newProductForm.category}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        category: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="number"
+                    placeholder="Price"
+                    value={newProductForm.price}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        price: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="number"
+                    placeholder="Old Price"
+                    value={newProductForm.oldPrice}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        oldPrice: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    placeholder="Color"
+                    value={newProductForm.color}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        color: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    placeholder="Sizes: S,M,L,XL"
+                    value={newProductForm.sizes}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        sizes: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="number"
+                    placeholder="Stock"
+                    value={newProductForm.stock}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        stock: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    placeholder="Tag"
+                    value={newProductForm.tag}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        tag: event.target.value,
+                      })
+                    }
+                  />
+                  <input
+                    type="text"
+                    placeholder="Image URL"
+                    value={newProductForm.image}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        image: event.target.value,
+                      })
+                    }
+                  />
+                  <textarea
+                    placeholder="Description"
+                    value={newProductForm.description}
+                    onChange={(event) =>
+                      setNewProductForm({
+                        ...newProductForm,
+                        description: event.target.value,
+                      })
+                    }
+                  />
 
-                <button type="submit" disabled={loading}>
-                  {editingProductId ? "Update Product" : "Add Product"}
-                </button>
-
-                {editingProductId && (
-                  <button
-                    type="button"
-                    className="secondary-btn"
-                    onClick={() => {
-                      setEditingProductId(null);
-                      setProductForm(emptyProductForm);
-                    }}
-                  >
-                    Cancel Edit
+                  <button onClick={addAdminProduct} disabled={adminLoading}>
+                    Add Product
                   </button>
-                )}
-              </form>
+                </div>
 
-              <div className="admin-tables">
-                <article className="admin-table-card">
-                  <h3>Manage Products</h3>
+                <div className="admin-list-card">
+                  <h3>Inventory</h3>
+
                   {products.map((product) => (
-                    <div className="admin-row" key={product.id}>
+                    <div className="admin-list-row" key={product.id}>
+                      <img src={product.image} alt={product.name} />
                       <div>
                         <strong>{product.name}</strong>
-                        <span>
-                          ₹{product.price} — {product.stock} stock
-                        </span>
+                        <p>
+                          ₹{product.price} · {product.stock} stock
+                        </p>
                       </div>
-                      <div className="row-actions">
-                        <button onClick={() => editProduct(product)}>
-                          Edit
-                        </button>
-                        <button onClick={() => deleteProduct(product.id)}>
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </article>
-
-                <article className="admin-table-card">
-                  <h3>Orders</h3>
-                  {adminOrders.length === 0 && <p>No orders yet.</p>}
-                  {adminOrders.map((order) => (
-                    <div className="admin-row" key={order.id}>
-                      <div>
-                        <strong>
-                          #{order.id} — {order.customerName}
-                        </strong>
-                        <span>
-                          ₹{order.finalAmount || order.totalAmount} —{" "}
-                          {order.status}
-                          {order.couponCode ? ` — ${order.couponCode}` : ""}
-                        </span>
-                      </div>
-                      <select
-                        value={order.status}
-                        onChange={(event) =>
-                          updateOrderStatus(order.id, event.target.value)
-                        }
+                      <button
+                        className="danger-button"
+                        onClick={() => deleteAdminProduct(product.id)}
                       >
-                        <option>Order Placed</option>
-                        <option>Processing</option>
-                        <option>Shipped</option>
-                        <option>Out for Delivery</option>
-                        <option>Delivered</option>
-                        <option>Cancelled</option>
-                      </select>
+                        Delete
+                      </button>
                     </div>
                   ))}
-                </article>
+                </div>
+              </div>
 
-                <article className="admin-table-card">
-                  <h3>Return / Exchange Requests</h3>
-                  {adminReturns.length === 0 && <p>No return requests yet.</p>}
-                  {adminReturns.map((request) => (
-                    <div className="admin-row" key={request.id}>
+              <div className="admin-table-card">
+                <h3>Orders</h3>
+
+                {adminOrders.length === 0 ? (
+                  <p className="muted">No orders yet.</p>
+                ) : (
+                  adminOrders.map((order) => (
+                    <div className="admin-order-card" key={order.id}>
                       <div>
-                        <strong>
-                          #{request.id} — {request.customerName}
-                        </strong>
-                        <span>
-                          {request.requestType} — {request.status}
-                        </span>
+                        <h4>
+                          #{order.id} · {order.customerName}
+                        </h4>
+                        <p>{order.email}</p>
+                        <p>
+                          Cart ₹{order.totalAmount} · Discount ₹
+                          {order.discountAmount || 0} · Final ₹
+                          {order.finalAmount || order.totalAmount}
+                        </p>
+                        <p>Coupon: {order.couponCode || "No Coupon"}</p>
                       </div>
-                      <div className="row-actions">
-                        <button
-                          onClick={() =>
-                            updateReturnStatus(request.id, "Approved")
+
+                      <div className="status-controls">
+                        <select
+                          value={order.status}
+                          onChange={(event) =>
+                            updateOrderStatus(
+                              order.id,
+                              event.target.value,
+                              order.paymentStatus
+                            )
                           }
                         >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() =>
-                            updateReturnStatus(request.id, "Rejected")
+                          <option value="Order Placed">Order Placed</option>
+                          <option value="Processing">Processing</option>
+                          <option value="Shipped">Shipped</option>
+                          <option value="Out for Delivery">
+                            Out for Delivery
+                          </option>
+                          <option value="Delivered">Delivered</option>
+                          <option value="Cancelled">Cancelled</option>
+                        </select>
+
+                        <select
+                          value={order.paymentStatus}
+                          onChange={(event) =>
+                            updateOrderStatus(order.id, order.status, event.target.value)
                           }
                         >
-                          Reject
-                        </button>
+                          <option value="Pending">Pending</option>
+                          <option value="Paid">Paid</option>
+                          <option value="Failed">Failed</option>
+                          <option value="Refunded">Refunded</option>
+                        </select>
                       </div>
                     </div>
-                  ))}
-                </article>
+                  ))
+                )}
+              </div>
+
+              <div className="admin-table-card">
+                <h3>Returns / Exchanges</h3>
+
+                {adminReturns.length === 0 ? (
+                  <p className="muted">No return requests yet.</p>
+                ) : (
+                  adminReturns.map((request) => (
+                    <div className="admin-order-card" key={request.id}>
+                      <div>
+                        <h4>
+                          #{request.id} · Order {request.orderId}
+                        </h4>
+                        <p>
+                          {request.customerName} · {request.requestType}
+                        </p>
+                        <p>{request.reason}</p>
+                      </div>
+
+                      <div className="status-controls">
+                        <select
+                          value={request.status}
+                          onChange={(event) =>
+                            updateReturnStatus(
+                              request.id,
+                              event.target.value,
+                              request.pickupStatus,
+                              request.refundStatus
+                            )
+                          }
+                        >
+                          <option value="Pending Admin Review">
+                            Pending Admin Review
+                          </option>
+                          <option value="Approved">Approved</option>
+                          <option value="Rejected">Rejected</option>
+                          <option value="Completed">Completed</option>
+                        </select>
+
+                        <select
+                          value={request.pickupStatus}
+                          onChange={(event) =>
+                            updateReturnStatus(
+                              request.id,
+                              request.status,
+                              event.target.value,
+                              request.refundStatus
+                            )
+                          }
+                        >
+                          <option value="Not Scheduled">Not Scheduled</option>
+                          <option value="Scheduled">Scheduled</option>
+                          <option value="Picked Up">Picked Up</option>
+                        </select>
+
+                        <select
+                          value={request.refundStatus}
+                          onChange={(event) =>
+                            updateReturnStatus(
+                              request.id,
+                              request.status,
+                              request.pickupStatus,
+                              event.target.value
+                            )
+                          }
+                        >
+                          <option value="Not Started">Not Started</option>
+                          <option value="Processing">Processing</option>
+                          <option value="Completed">Completed</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
         </section>
-
-        <section id="checkout" className="section-block cart-section">
-          <div className="section-heading">
-            <p className="eyebrow">Checkout</p>
-            <h2>Cart, coupon, checkout, and return request.</h2>
-          </div>
-
-          <div className="checkout-grid">
-            <article className="cart-card">
-              <h3>Your Cart</h3>
-
-              {cart.length === 0 && <p>Your cart is empty.</p>}
-
-              {cart.map((item) => (
-                <div className="cart-row" key={item.id}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <span>
-                      {item.quantity} × ₹{item.price}
-                    </span>
-                  </div>
-                  <button onClick={() => removeFromCart(item.id)}>Remove</button>
-                </div>
-              ))}
-
-              <div className="coupon-box">
-                <h4>Apply Coupon</h4>
-
-                <div className="coupon-input-row">
-                  <input
-                    placeholder="Enter coupon code"
-                    value={couponCode}
-                    onChange={(event) =>
-                      setCouponCode(event.target.value.toUpperCase())
-                    }
-                  />
-                  <button type="button" onClick={applyCoupon} disabled={loading}>
-                    Apply
-                  </button>
-                </div>
-
-                {couponMessage && <p>{couponMessage}</p>}
-
-                {availableCoupons.length > 0 && (
-                  <div className="coupon-list">
-                    {availableCoupons.map((coupon) => (
-                      <button
-                        type="button"
-                        key={coupon.code}
-                        onClick={() => setCouponCode(coupon.code)}
-                      >
-                        <strong>{coupon.code}</strong>
-                        <span>{coupon.description}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {appliedCoupon && (
-                  <button
-                    type="button"
-                    className="remove-coupon-btn"
-                    onClick={removeCoupon}
-                  >
-                    Remove Coupon
-                  </button>
-                )}
-              </div>
-
-              <div className="cart-total detailed-total">
-                <div>
-                  <span>Cart Total</span>
-                  <strong>₹{cartTotal}</strong>
-                </div>
-
-                <div>
-                  <span>Discount</span>
-                  <strong>- ₹{discountAmount}</strong>
-                </div>
-
-                <div>
-                  <span>Final Payable</span>
-                  <strong>₹{finalCartAmount}</strong>
-                </div>
-              </div>
-            </article>
-
-            <form onSubmit={placeOrder} className="checkout-form">
-              <h3>Place Order</h3>
-              <input
-                placeholder="Customer name"
-                value={checkoutForm.customerName}
-                onChange={(event) =>
-                  setCheckoutForm({
-                    ...checkoutForm,
-                    customerName: event.target.value,
-                  })
-                }
-              />
-              <input
-                placeholder="Email"
-                value={checkoutForm.email}
-                onChange={(event) =>
-                  setCheckoutForm({
-                    ...checkoutForm,
-                    email: event.target.value,
-                  })
-                }
-              />
-              <input
-                placeholder="Phone"
-                value={checkoutForm.phone}
-                onChange={(event) =>
-                  setCheckoutForm({
-                    ...checkoutForm,
-                    phone: event.target.value,
-                  })
-                }
-              />
-              <textarea
-                placeholder="Address"
-                value={checkoutForm.address}
-                onChange={(event) =>
-                  setCheckoutForm({
-                    ...checkoutForm,
-                    address: event.target.value,
-                  })
-                }
-              />
-              <button type="submit" disabled={loading}>
-                Place Order
-              </button>
-            </form>
-
-            <form onSubmit={submitReturnRequest} className="return-form">
-              <h3>Return / Exchange Request</h3>
-              <input
-                placeholder="Order ID"
-                value={returnForm.orderId}
-                onChange={(event) =>
-                  setReturnForm({ ...returnForm, orderId: event.target.value })
-                }
-              />
-              <input
-                placeholder="Customer name"
-                value={returnForm.customerName}
-                onChange={(event) =>
-                  setReturnForm({
-                    ...returnForm,
-                    customerName: event.target.value,
-                  })
-                }
-              />
-              <input
-                placeholder="Email"
-                value={returnForm.email}
-                onChange={(event) =>
-                  setReturnForm({ ...returnForm, email: event.target.value })
-                }
-              />
-              <input
-                placeholder="Product name"
-                value={returnForm.productName}
-                onChange={(event) =>
-                  setReturnForm({
-                    ...returnForm,
-                    productName: event.target.value,
-                  })
-                }
-              />
-              <input
-                placeholder="Size"
-                value={returnForm.size}
-                onChange={(event) =>
-                  setReturnForm({ ...returnForm, size: event.target.value })
-                }
-              />
-              <select
-                value={returnForm.requestType}
-                onChange={(event) =>
-                  setReturnForm({
-                    ...returnForm,
-                    requestType: event.target.value,
-                  })
-                }
-              >
-                <option>Return</option>
-                <option>Exchange</option>
-                <option>Refund</option>
-              </select>
-              <textarea
-                placeholder="Reason"
-                value={returnForm.reason}
-                onChange={(event) =>
-                  setReturnForm({ ...returnForm, reason: event.target.value })
-                }
-              />
-              <button type="submit" disabled={loading}>
-                Submit Request
-              </button>
-            </form>
-          </div>
-        </section>
       </main>
 
       {selectedProduct && (
-        <div className="product-detail-overlay">
-          <div className="product-detail-modal">
-            <button className="close-detail" onClick={closeProductDetails}>
+        <div className="modal-backdrop" onClick={() => setSelectedProduct(null)}>
+          <div className="product-modal" onClick={(event) => event.stopPropagation()}>
+            <button
+              className="modal-close"
+              onClick={() => setSelectedProduct(null)}
+            >
               ×
             </button>
 
-            <div className="detail-image">
+            <div className="modal-product-layout">
               <img src={selectedProduct.image} alt={selectedProduct.name} />
+
+              <div>
+                <p className="eyebrow">{selectedProduct.category}</p>
+                <h2>{selectedProduct.name}</h2>
+                <p>{selectedProduct.description}</p>
+
+                <div className="product-meta modal-meta">
+                  <span>{selectedProduct.color}</span>
+                  <span>{(selectedProduct.sizes || []).join(" / ")}</span>
+                  <span>{selectedProduct.stock} in stock</span>
+                </div>
+
+                <div className="price-row modal-price">
+                  <strong>₹{selectedProduct.price}</strong>
+                  {Number(selectedProduct.oldPrice || 0) >
+                    Number(selectedProduct.price || 0) && (
+                    <del>₹{selectedProduct.oldPrice}</del>
+                  )}
+                </div>
+
+                <button onClick={() => addToCart(selectedProduct)}>
+                  Add Main Product to Cart
+                </button>
+              </div>
             </div>
 
-            <div className="detail-content">
-              <p className="eyebrow">{selectedProduct.category}</p>
-              <h2>{selectedProduct.name}</h2>
-              <p>{selectedProduct.description}</p>
-
-              <div className="detail-price">
-                <strong>₹{selectedProduct.price}</strong>
-                {selectedProduct.oldPrice ? (
-                  <span>₹{selectedProduct.oldPrice}</span>
-                ) : null}
+            <div className="complete-look-panel">
+              <div className="section-heading left-heading">
+                <p className="eyebrow">AI Complete-the-Look</p>
+                <h3>Recommended with {selectedProduct.name}</h3>
               </div>
 
-              <div className="detail-tags">
-                <span>Color: {selectedProduct.color}</span>
-                <span>Sizes: {(selectedProduct.sizes || []).join(" / ")}</span>
-                <span>Stock: {selectedProduct.stock}</span>
-                <span>{selectedProduct.tag}</span>
-              </div>
+              {completeLookLoading ? (
+                <p className="muted">Loading recommendations...</p>
+              ) : completeLookProducts.length === 0 ? (
+                <p className="muted">No complete-the-look products found.</p>
+              ) : (
+                <>
+                  <div className="mini-product-grid">
+                    {completeLookProducts.map((product) => (
+                      <article className="mini-product-card" key={product.id}>
+                        <img src={product.image} alt={product.name} />
+                        <div>
+                          <p>{product.category}</p>
+                          <h4>{product.name}</h4>
+                          <strong>₹{product.price}</strong>
+                          <button onClick={() => addToCart(product)}>
+                            Add Item
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
 
-              <div className="detail-benefits">
-                <h3>Why customers will like this</h3>
-                <ul>
-                  <li>Premium fashion-friendly product presentation</li>
-                  <li>Clear sizing and stock information</li>
-                  <li>Easy cart conversion from detail view</li>
-                </ul>
-              </div>
-
-              <button
-                className="detail-cart-btn"
-                onClick={() => {
-                  addToCart(selectedProduct);
-                  closeProductDetails();
-                }}
-              >
-                Add to Cart
-              </button>
+                  <button
+                    className="full-width-button"
+                    onClick={() => addMultipleToCart(completeLookProducts)}
+                  >
+                    Add Complete Look to Cart
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
-
-      <footer className="footer">
-        <div>
-          <strong>StyleNexa AI</strong>
-          <p>AI-powered fashion e-commerce and operations platform.</p>
-        </div>
-        <span>Built with React, Node.js, Express, MongoDB, Gemini AI.</span>
-      </footer>
     </div>
   );
 }
