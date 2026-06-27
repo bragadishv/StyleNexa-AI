@@ -26,7 +26,6 @@ function App() {
   const [sortOption, setSortOption] = useState("featured");
 
   const [cart, setCart] = useState([]);
-  const [activeSection, setActiveSection] = useState("home");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -55,6 +54,11 @@ function App() {
     phone: "",
     address: "",
   });
+
+  const [availableCoupons, setAvailableCoupons] = useState([]);
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponMessage, setCouponMessage] = useState("");
 
   const [returnForm, setReturnForm] = useState({
     orderId: "",
@@ -86,6 +90,7 @@ function App() {
     password: "admin123",
   });
   const [adminSummary, setAdminSummary] = useState(null);
+  const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [adminOrders, setAdminOrders] = useState([]);
   const [adminReturns, setAdminReturns] = useState([]);
   const [productForm, setProductForm] = useState(emptyProductForm);
@@ -99,6 +104,12 @@ function App() {
       ),
     [cart]
   );
+
+  const discountAmount = appliedCoupon
+    ? Number(appliedCoupon.discountAmount || 0)
+    : 0;
+
+  const finalCartAmount = Math.max(cartTotal - discountAmount, 0);
 
   const productCategories = useMemo(() => {
     return ["All", ...new Set(products.map((product) => product.category))];
@@ -170,6 +181,10 @@ function App() {
     localStorage.removeItem("stylenexaAdminUser");
     setAdminToken("");
     setAdminUser("");
+    setAdminSummary(null);
+    setAdminAnalytics(null);
+    setAdminOrders([]);
+    setAdminReturns([]);
     showMessage("Admin session expired. Please login again.");
   }
 
@@ -186,13 +201,29 @@ function App() {
     }
   }
 
+  async function fetchCoupons() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/coupons`);
+      const data = await response.json();
+
+      if (data.success) {
+        setAvailableCoupons(data.coupons || []);
+      }
+    } catch (error) {
+      console.log("Unable to load coupons.");
+    }
+  }
+
   async function fetchAdminData() {
     if (!adminToken) return;
 
     try {
-      const [summaryResponse, ordersResponse, returnsResponse] =
+      const [summaryResponse, analyticsResponse, ordersResponse, returnsResponse] =
         await Promise.all([
           fetch(`${API_BASE_URL}/api/admin/summary`, {
+            headers: getAdminHeaders(),
+          }),
+          fetch(`${API_BASE_URL}/api/admin/analytics`, {
             headers: getAdminHeaders(),
           }),
           fetch(`${API_BASE_URL}/api/orders`, {
@@ -205,6 +236,7 @@ function App() {
 
       if (
         summaryResponse.status === 401 ||
+        analyticsResponse.status === 401 ||
         ordersResponse.status === 401 ||
         returnsResponse.status === 401
       ) {
@@ -213,10 +245,12 @@ function App() {
       }
 
       const summaryData = await summaryResponse.json();
+      const analyticsData = await analyticsResponse.json();
       const ordersData = await ordersResponse.json();
       const returnsData = await returnsResponse.json();
 
       if (summaryData.success) setAdminSummary(summaryData.summary);
+      if (analyticsData.success) setAdminAnalytics(analyticsData.analytics);
       if (ordersData.success) setAdminOrders(ordersData.orders || []);
       if (returnsData.success) setAdminReturns(returnsData.requests || []);
     } catch (error) {
@@ -226,6 +260,7 @@ function App() {
 
   useEffect(() => {
     fetchProducts();
+    fetchCoupons();
   }, []);
 
   useEffect(() => {
@@ -235,7 +270,6 @@ function App() {
   }, [adminToken]);
 
   function scrollToSection(sectionId) {
-    setActiveSection(sectionId);
     setTimeout(() => {
       document.getElementById(sectionId)?.scrollIntoView({
         behavior: "smooth",
@@ -259,6 +293,8 @@ function App() {
       return [...currentCart, { ...product, quantity: 1 }];
     });
 
+    setAppliedCoupon(null);
+    setCouponMessage("");
     showMessage(`${product.name} added to cart.`);
   }
 
@@ -289,6 +325,8 @@ function App() {
     setCart((currentCart) =>
       currentCart.filter((item) => item.id !== productId)
     );
+    setAppliedCoupon(null);
+    setCouponMessage("");
   }
 
   async function askStylist() {
@@ -377,6 +415,59 @@ function App() {
     }
   }
 
+  async function applyCoupon() {
+    if (cart.length === 0) {
+      showMessage("Add products to cart before applying coupon.");
+      return;
+    }
+
+    if (!couponCode.trim()) {
+      showMessage("Please enter a coupon code.");
+      return;
+    }
+
+    setLoading(true);
+    setCouponMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/coupons/validate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          couponCode,
+          totalAmount: cartTotal,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setAppliedCoupon(data);
+        setCouponMessage(data.message);
+        showMessage(data.message);
+      } else {
+        setAppliedCoupon(null);
+        setCouponMessage(data.message || "Invalid coupon.");
+        showMessage(data.message || "Invalid coupon.");
+      }
+    } catch (error) {
+      setAppliedCoupon(null);
+      setCouponMessage("Unable to apply coupon.");
+      showMessage("Unable to apply coupon.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function removeCoupon() {
+    setCouponCode("");
+    setAppliedCoupon(null);
+    setCouponMessage("");
+    showMessage("Coupon removed.");
+  }
+
   async function placeOrder(event) {
     event.preventDefault();
 
@@ -402,6 +493,7 @@ function App() {
           ...checkoutForm,
           items: cart,
           totalAmount: cartTotal,
+          couponCode: appliedCoupon ? appliedCoupon.couponCode : "",
         }),
       });
 
@@ -409,6 +501,9 @@ function App() {
 
       if (data.success) {
         setCart([]);
+        setCouponCode("");
+        setAppliedCoupon(null);
+        setCouponMessage("");
         setCheckoutForm({
           customerName: "",
           email: "",
@@ -591,6 +686,7 @@ function App() {
     setAdminToken("");
     setAdminUser("");
     setAdminSummary(null);
+    setAdminAnalytics(null);
     setAdminOrders([]);
     setAdminReturns([]);
     showMessage("Admin logged out.");
@@ -803,9 +899,9 @@ function App() {
             <h1>Premium clothing store with AI shopping intelligence.</h1>
             <p>
               StyleNexa AI combines a modern fashion storefront, AI stylist,
-              MongoDB cloud database, admin operations, order tracking, customer
-              dashboard, product detail views, and smart search in one
-              client-ready platform.
+              MongoDB cloud database, admin operations, order tracking, coupon
+              discounts, customer dashboard, product detail views, and revenue
+              analytics in one client-ready platform.
             </p>
             <div className="hero-actions">
               <button onClick={() => scrollToSection("products")}>
@@ -825,7 +921,7 @@ function App() {
             <h2>Style. Sell. Track. Scale.</h2>
             <p>
               Built for fashion brands that want AI-powered shopping,
-              operations, and customer experience.
+              operations, discounts, and customer experience.
             </p>
           </div>
         </section>
@@ -840,12 +936,12 @@ function App() {
             <span>Stylist Assistant</span>
           </div>
           <div>
-            <strong>MongoDB</strong>
-            <span>Cloud Database</span>
+            <strong>Coupons</strong>
+            <span>Discount Engine</span>
           </div>
           <div>
             <strong>Admin</strong>
-            <span>Operations Panel</span>
+            <span>Revenue Analytics</span>
           </div>
         </section>
 
@@ -1128,10 +1224,21 @@ function App() {
                       <strong>{trackedOrder.order.status}</strong>
                     </div>
                     <div>
-                      <span>Total</span>
-                      <strong>₹{trackedOrder.order.totalAmount}</strong>
+                      <span>Payable</span>
+                      <strong>
+                        ₹
+                        {trackedOrder.order.finalAmount ||
+                          trackedOrder.order.totalAmount}
+                      </strong>
                     </div>
                   </div>
+
+                  {(trackedOrder.order.discountAmount || 0) > 0 && (
+                    <div className="order-discount-note">
+                      Coupon {trackedOrder.order.couponCode} saved ₹
+                      {trackedOrder.order.discountAmount}
+                    </div>
+                  )}
 
                   <div className="timeline">
                     {trackedOrder.tracking.timeline.map((step) => (
@@ -1198,10 +1305,8 @@ function App() {
                       <strong>₹{customerDashboard.customer.totalSpent}</strong>
                     </div>
                     <div>
-                      <span>Returns</span>
-                      <strong>
-                        {customerDashboard.customer.totalReturnRequests}
-                      </strong>
+                      <span>Total Saved</span>
+                      <strong>₹{customerDashboard.customer.totalSaved || 0}</strong>
                     </div>
                   </div>
 
@@ -1215,7 +1320,9 @@ function App() {
                         <span>
                           #{order.id} — {order.status}
                         </span>
-                        <strong>₹{order.totalAmount}</strong>
+                        <strong>
+                          ₹{order.finalAmount || order.totalAmount}
+                        </strong>
                       </div>
                     ))}
                   </div>
@@ -1245,7 +1352,7 @@ function App() {
         <section id="admin" className="section-block admin-section">
           <div className="section-heading">
             <p className="eyebrow">Admin Operations</p>
-            <h2>Manage products, orders, and returns.</h2>
+            <h2>Manage products, orders, returns, and revenue.</h2>
           </div>
 
           {!isAdminLoggedIn ? (
@@ -1253,8 +1360,8 @@ function App() {
               <div>
                 <h3>Protected admin dashboard</h3>
                 <p>
-                  Login to manage inventory, orders, return approvals, and
-                  revenue summary.
+                  Login to manage inventory, orders, return approvals, revenue
+                  summary, coupons, and product analytics.
                 </p>
 
                 <div className="demo-credentials">
@@ -1319,6 +1426,86 @@ function App() {
                   <div>
                     <span>Pending Returns</span>
                     <strong>{adminSummary.pendingReturns}</strong>
+                  </div>
+                </div>
+              )}
+
+              {adminAnalytics && (
+                <div className="analytics-panel">
+                  <h3>Revenue Analytics</h3>
+
+                  <div className="dashboard-grid">
+                    <div>
+                      <span>Gross Revenue</span>
+                      <strong>₹{adminAnalytics.grossRevenue}</strong>
+                    </div>
+                    <div>
+                      <span>Discount Given</span>
+                      <strong>₹{adminAnalytics.totalDiscountGiven}</strong>
+                    </div>
+                    <div>
+                      <span>Net Revenue</span>
+                      <strong>₹{adminAnalytics.netRevenue}</strong>
+                    </div>
+                    <div>
+                      <span>Avg Order Value</span>
+                      <strong>₹{adminAnalytics.averageOrderValue}</strong>
+                    </div>
+                  </div>
+
+                  <div className="analytics-grid">
+                    <article>
+                      <h4>Order Status</h4>
+                      {Object.entries(adminAnalytics.statusCounts || {}).map(
+                        ([key, value]) => (
+                          <div className="analytics-row" key={key}>
+                            <span>{key}</span>
+                            <strong>{value}</strong>
+                          </div>
+                        )
+                      )}
+                    </article>
+
+                    <article>
+                      <h4>Coupon Usage</h4>
+                      {Object.entries(adminAnalytics.couponUsage || {}).map(
+                        ([key, value]) => (
+                          <div className="analytics-row" key={key}>
+                            <span>{key}</span>
+                            <strong>{value}</strong>
+                          </div>
+                        )
+                      )}
+                    </article>
+
+                    <article>
+                      <h4>Top Products</h4>
+                      {(adminAnalytics.topProducts || []).length === 0 && (
+                        <p>No product sales yet.</p>
+                      )}
+                      {(adminAnalytics.topProducts || []).map((product) => (
+                        <div
+                          className="analytics-row"
+                          key={product.productName}
+                        >
+                          <span>{product.productName}</span>
+                          <strong>{product.quantitySold}</strong>
+                        </div>
+                      ))}
+                    </article>
+
+                    <article>
+                      <h4>Low Stock Alerts</h4>
+                      {(adminAnalytics.lowStockProducts || []).length === 0 && (
+                        <p>No low stock products.</p>
+                      )}
+                      {(adminAnalytics.lowStockProducts || []).map((product) => (
+                        <div className="analytics-row" key={product.id}>
+                          <span>{product.name}</span>
+                          <strong>{product.stock}</strong>
+                        </div>
+                      ))}
+                    </article>
                   </div>
                 </div>
               )}
@@ -1472,7 +1659,9 @@ function App() {
                           #{order.id} — {order.customerName}
                         </strong>
                         <span>
-                          ₹{order.totalAmount} — {order.status}
+                          ₹{order.finalAmount || order.totalAmount} —{" "}
+                          {order.status}
+                          {order.couponCode ? ` — ${order.couponCode}` : ""}
                         </span>
                       </div>
                       <select
@@ -1532,7 +1721,7 @@ function App() {
         <section id="checkout" className="section-block cart-section">
           <div className="section-heading">
             <p className="eyebrow">Checkout</p>
-            <h2>Cart, checkout, and return request.</h2>
+            <h2>Cart, coupon, checkout, and return request.</h2>
           </div>
 
           <div className="checkout-grid">
@@ -1553,9 +1742,65 @@ function App() {
                 </div>
               ))}
 
-              <div className="cart-total">
-                <span>Total</span>
-                <strong>₹{cartTotal}</strong>
+              <div className="coupon-box">
+                <h4>Apply Coupon</h4>
+
+                <div className="coupon-input-row">
+                  <input
+                    placeholder="Enter coupon code"
+                    value={couponCode}
+                    onChange={(event) =>
+                      setCouponCode(event.target.value.toUpperCase())
+                    }
+                  />
+                  <button type="button" onClick={applyCoupon} disabled={loading}>
+                    Apply
+                  </button>
+                </div>
+
+                {couponMessage && <p>{couponMessage}</p>}
+
+                {availableCoupons.length > 0 && (
+                  <div className="coupon-list">
+                    {availableCoupons.map((coupon) => (
+                      <button
+                        type="button"
+                        key={coupon.code}
+                        onClick={() => setCouponCode(coupon.code)}
+                      >
+                        <strong>{coupon.code}</strong>
+                        <span>{coupon.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {appliedCoupon && (
+                  <button
+                    type="button"
+                    className="remove-coupon-btn"
+                    onClick={removeCoupon}
+                  >
+                    Remove Coupon
+                  </button>
+                )}
+              </div>
+
+              <div className="cart-total detailed-total">
+                <div>
+                  <span>Cart Total</span>
+                  <strong>₹{cartTotal}</strong>
+                </div>
+
+                <div>
+                  <span>Discount</span>
+                  <strong>- ₹{discountAmount}</strong>
+                </div>
+
+                <div>
+                  <span>Final Payable</span>
+                  <strong>₹{finalCartAmount}</strong>
+                </div>
               </div>
             </article>
 

@@ -50,6 +50,36 @@ if (
   });
 }
 
+const availableCoupons = [
+  {
+    code: "STYLE10",
+    type: "percentage",
+    value: 10,
+    minCartValue: 999,
+    maxDiscount: 500,
+    title: "10% off streetwear order",
+    description: "Get 10% off on cart value above ₹999.",
+  },
+  {
+    code: "NEXA20",
+    type: "percentage",
+    value: 20,
+    minCartValue: 1999,
+    maxDiscount: 1000,
+    title: "20% premium drop offer",
+    description: "Get 20% off on cart value above ₹1999.",
+  },
+  {
+    code: "WELCOME250",
+    type: "fixed",
+    value: 250,
+    minCartValue: 1499,
+    maxDiscount: 250,
+    title: "Welcome discount",
+    description: "Flat ₹250 off on cart value above ₹1499.",
+  },
+];
+
 const defaultProducts = [
   {
     id: 1,
@@ -115,50 +145,16 @@ const defaultProducts = [
 
 const productSchema = new mongoose.Schema(
   {
-    id: {
-      type: Number,
-      required: true,
-      index: true,
-    },
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    category: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    price: {
-      type: Number,
-      required: true,
-    },
-    oldPrice: {
-      type: Number,
-      default: 0,
-    },
-    color: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    sizes: {
-      type: [String],
-      default: ["S", "M", "L", "XL"],
-    },
-    stock: {
-      type: Number,
-      default: 0,
-    },
-    tag: {
-      type: String,
-      default: "New Product",
-    },
-    description: {
-      type: String,
-      required: true,
-    },
+    id: { type: Number, required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    category: { type: String, required: true, trim: true },
+    price: { type: Number, required: true },
+    oldPrice: { type: Number, default: 0 },
+    color: { type: String, required: true, trim: true },
+    sizes: { type: [String], default: ["S", "M", "L", "XL"] },
+    stock: { type: Number, default: 0 },
+    tag: { type: String, default: "New Product" },
+    description: { type: String, required: true },
     image: {
       type: String,
       default:
@@ -170,16 +166,8 @@ const productSchema = new mongoose.Schema(
 
 const orderSchema = new mongoose.Schema(
   {
-    id: {
-      type: Number,
-      required: true,
-      index: true,
-    },
-    customerName: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    id: { type: Number, required: true, index: true },
+    customerName: { type: String, required: true, trim: true },
     email: {
       type: String,
       required: true,
@@ -187,49 +175,24 @@ const orderSchema = new mongoose.Schema(
       lowercase: true,
       index: true,
     },
-    phone: {
-      type: String,
-      default: "",
-    },
-    items: {
-      type: Array,
-      default: [],
-    },
-    totalAmount: {
-      type: Number,
-      default: 0,
-    },
-    address: {
-      type: String,
-      default: "",
-    },
-    status: {
-      type: String,
-      default: "Order Placed",
-    },
-    paymentStatus: {
-      type: String,
-      default: "Pending",
-    },
+    phone: { type: String, default: "" },
+    items: { type: Array, default: [] },
+    totalAmount: { type: Number, default: 0 },
+    discountAmount: { type: Number, default: 0 },
+    finalAmount: { type: Number, default: 0 },
+    couponCode: { type: String, default: "" },
+    address: { type: String, default: "" },
+    status: { type: String, default: "Order Placed" },
+    paymentStatus: { type: String, default: "Pending" },
   },
   { timestamps: true }
 );
 
 const returnRequestSchema = new mongoose.Schema(
   {
-    id: {
-      type: Number,
-      required: true,
-      index: true,
-    },
-    orderId: {
-      type: String,
-      required: true,
-    },
-    customerName: {
-      type: String,
-      required: true,
-    },
+    id: { type: Number, required: true, index: true },
+    orderId: { type: String, required: true },
+    customerName: { type: String, required: true },
     email: {
       type: String,
       default: "",
@@ -237,34 +200,13 @@ const returnRequestSchema = new mongoose.Schema(
       lowercase: true,
       index: true,
     },
-    productName: {
-      type: String,
-      default: "",
-    },
-    size: {
-      type: String,
-      default: "",
-    },
-    requestType: {
-      type: String,
-      required: true,
-    },
-    reason: {
-      type: String,
-      required: true,
-    },
-    status: {
-      type: String,
-      default: "Pending Admin Review",
-    },
-    pickupStatus: {
-      type: String,
-      default: "Not Scheduled",
-    },
-    refundStatus: {
-      type: String,
-      default: "Not Started",
-    },
+    productName: { type: String, default: "" },
+    size: { type: String, default: "" },
+    requestType: { type: String, required: true },
+    reason: { type: String, required: true },
+    status: { type: String, default: "Pending Admin Review" },
+    pickupStatus: { type: String, default: "Not Scheduled" },
+    refundStatus: { type: String, default: "Not Started" },
   },
   { timestamps: true }
 );
@@ -312,6 +254,10 @@ function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
 
+function normalizeCoupon(code) {
+  return String(code || "").trim().toUpperCase();
+}
+
 function escapeRegex(value) {
   return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -319,6 +265,65 @@ function escapeRegex(value) {
 async function getNextId(Model) {
   const latestItem = await Model.findOne().sort({ id: -1 }).lean();
   return latestItem && latestItem.id ? latestItem.id + 1 : 1;
+}
+
+function calculateCouponDiscount(couponCode, totalAmount) {
+  const cleanCode = normalizeCoupon(couponCode);
+  const cartTotal = Number(totalAmount || 0);
+
+  if (!cleanCode) {
+    return {
+      valid: true,
+      couponCode: "",
+      discountAmount: 0,
+      finalAmount: cartTotal,
+      message: "No coupon applied.",
+    };
+  }
+
+  const coupon = availableCoupons.find((item) => item.code === cleanCode);
+
+  if (!coupon) {
+    return {
+      valid: false,
+      couponCode: "",
+      discountAmount: 0,
+      finalAmount: cartTotal,
+      message: "Invalid coupon code.",
+    };
+  }
+
+  if (cartTotal < coupon.minCartValue) {
+    return {
+      valid: false,
+      couponCode: "",
+      discountAmount: 0,
+      finalAmount: cartTotal,
+      message: `Minimum cart value for ${coupon.code} is ₹${coupon.minCartValue}.`,
+    };
+  }
+
+  let discountAmount = 0;
+
+  if (coupon.type === "percentage") {
+    discountAmount = Math.round((cartTotal * coupon.value) / 100);
+    discountAmount = Math.min(discountAmount, coupon.maxDiscount);
+  }
+
+  if (coupon.type === "fixed") {
+    discountAmount = coupon.value;
+  }
+
+  discountAmount = Math.min(discountAmount, cartTotal);
+
+  return {
+    valid: true,
+    coupon,
+    couponCode: coupon.code,
+    discountAmount,
+    finalAmount: cartTotal - discountAmount,
+    message: `${coupon.code} applied successfully. You saved ₹${discountAmount}.`,
+  };
 }
 
 function buildOrderTimeline(status) {
@@ -472,17 +477,18 @@ app.get("/", (req, res) => {
   res.json({
     message: "StyleNexa AI Backend is running successfully 🚀",
     project: "StyleNexa AI",
-    version: "1.1.0",
+    version: "1.2.0",
     database: "MongoDB Atlas connected",
     geminiConfigured: Boolean(ai),
     aiDemoMode: AI_DEMO_MODE,
     geminiModel: GEMINI_MODEL,
     adminAuth: "Enabled",
     newFeatures: [
-      "Public order tracking",
+      "Coupon validation",
+      "Discounted checkout",
+      "Admin revenue analytics",
+      "Order tracking",
       "Customer dashboard",
-      "Customer order history",
-      "Customer return history",
     ],
   });
 });
@@ -496,7 +502,38 @@ app.get("/api/health", (req, res) => {
     aiDemoMode: AI_DEMO_MODE,
     geminiModel: GEMINI_MODEL,
     adminAuth: "Enabled",
-    version: "1.1.0",
+    version: "1.2.0",
+  });
+});
+
+app.get("/api/coupons", (req, res) => {
+  res.json({
+    success: true,
+    coupons: availableCoupons,
+  });
+});
+
+app.post("/api/coupons/validate", (req, res) => {
+  const { couponCode, totalAmount } = req.body;
+
+  const result = calculateCouponDiscount(couponCode, totalAmount);
+
+  if (!result.valid) {
+    return res.status(400).json({
+      success: false,
+      message: result.message,
+      discountAmount: 0,
+      finalAmount: Number(totalAmount || 0),
+    });
+  }
+
+  res.json({
+    success: true,
+    message: result.message,
+    couponCode: result.couponCode,
+    coupon: result.coupon || null,
+    discountAmount: result.discountAmount,
+    finalAmount: result.finalAmount,
   });
 });
 
@@ -575,12 +612,30 @@ app.get("/api/products/:id", async (req, res) => {
 
 app.post("/api/orders", async (req, res) => {
   try {
-    const { customerName, email, phone, items, totalAmount, address } = req.body;
+    const {
+      customerName,
+      email,
+      phone,
+      items,
+      totalAmount,
+      address,
+      couponCode,
+    } = req.body;
 
     if (!customerName || !email || !items || items.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Customer name, email, and cart items are required.",
+      });
+    }
+
+    const cartTotal = Number(totalAmount || 0);
+    const couponResult = calculateCouponDiscount(couponCode, cartTotal);
+
+    if (!couponResult.valid) {
+      return res.status(400).json({
+        success: false,
+        message: couponResult.message,
       });
     }
 
@@ -590,7 +645,10 @@ app.post("/api/orders", async (req, res) => {
       email: normalizeEmail(email),
       phone: phone || "",
       items,
-      totalAmount: Number(totalAmount || 0),
+      totalAmount: cartTotal,
+      discountAmount: couponResult.discountAmount,
+      finalAmount: couponResult.finalAmount,
+      couponCode: couponResult.couponCode,
       address: address || "",
       status: "Order Placed",
       paymentStatus: "Pending",
@@ -600,6 +658,7 @@ app.post("/api/orders", async (req, res) => {
       success: true,
       message: "Order placed successfully.",
       order: newOrder,
+      savings: couponResult.discountAmount,
       trackingHint:
         "Use your Order ID and email address to track this order anytime.",
     });
@@ -657,6 +716,9 @@ app.get("/api/orders/track", async (req, res) => {
         status: order.status,
         paymentStatus: order.paymentStatus,
         totalAmount: order.totalAmount,
+        discountAmount: order.discountAmount || 0,
+        finalAmount: order.finalAmount || order.totalAmount,
+        couponCode: order.couponCode || "",
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         timeline: buildOrderTimeline(order.status),
@@ -699,7 +761,13 @@ app.get("/api/customer/dashboard", async (req, res) => {
       .lean();
 
     const totalSpent = orders.reduce(
-      (sum, order) => sum + Number(order.totalAmount || 0),
+      (sum, order) =>
+        sum + Number(order.finalAmount || order.totalAmount || 0),
+      0
+    );
+
+    const totalSaved = orders.reduce(
+      (sum, order) => sum + Number(order.discountAmount || 0),
       0
     );
 
@@ -719,6 +787,7 @@ app.get("/api/customer/dashboard", async (req, res) => {
         totalOrders: orders.length,
         activeOrders,
         totalSpent,
+        totalSaved,
         totalReturnRequests: returnRequests.length,
       },
       orders,
@@ -791,7 +860,8 @@ app.get("/api/admin/summary", authenticateAdmin, async (req, res) => {
     const returnRequests = await ReturnRequest.find().lean();
 
     const totalRevenue = orders.reduce(
-      (sum, order) => sum + Number(order.totalAmount || 0),
+      (sum, order) =>
+        sum + Number(order.finalAmount || order.totalAmount || 0),
       0
     );
 
@@ -819,6 +889,110 @@ app.get("/api/admin/summary", authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Unable to fetch admin summary.",
+    });
+  }
+});
+
+app.get("/api/admin/analytics", authenticateAdmin, async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ id: -1 }).lean();
+    const products = await Product.find().lean();
+    const returnRequests = await ReturnRequest.find().lean();
+
+    const grossRevenue = orders.reduce(
+      (sum, order) => sum + Number(order.totalAmount || 0),
+      0
+    );
+
+    const totalDiscountGiven = orders.reduce(
+      (sum, order) => sum + Number(order.discountAmount || 0),
+      0
+    );
+
+    const netRevenue = orders.reduce(
+      (sum, order) =>
+        sum + Number(order.finalAmount || order.totalAmount || 0),
+      0
+    );
+
+    const averageOrderValue =
+      orders.length > 0 ? Math.round(netRevenue / orders.length) : 0;
+
+    const statusCounts = orders.reduce((acc, order) => {
+      const status = order.status || "Unknown";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    const paymentCounts = orders.reduce((acc, order) => {
+      const status = order.paymentStatus || "Unknown";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    const couponUsage = orders.reduce((acc, order) => {
+      const code = order.couponCode || "No Coupon";
+      acc[code] = (acc[code] || 0) + 1;
+      return acc;
+    }, {});
+
+    const productSalesMap = {};
+
+    orders.forEach((order) => {
+      (order.items || []).forEach((item) => {
+        const key = item.name || `Product ${item.id}`;
+        const quantity = Number(item.quantity || 1);
+        const revenue = Number(item.price || 0) * quantity;
+
+        if (!productSalesMap[key]) {
+          productSalesMap[key] = {
+            productName: key,
+            quantitySold: 0,
+            revenue: 0,
+          };
+        }
+
+        productSalesMap[key].quantitySold += quantity;
+        productSalesMap[key].revenue += revenue;
+      });
+    });
+
+    const topProducts = Object.values(productSalesMap)
+      .sort((a, b) => b.quantitySold - a.quantitySold)
+      .slice(0, 5);
+
+    const lowStockProducts = products
+      .filter((product) => Number(product.stock || 0) <= 10)
+      .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0));
+
+    res.json({
+      success: true,
+      analytics: {
+        grossRevenue,
+        totalDiscountGiven,
+        netRevenue,
+        averageOrderValue,
+        totalOrders: orders.length,
+        processingOrders: statusCounts.Processing || 0,
+        deliveredOrders: statusCounts.Delivered || 0,
+        pendingPaymentOrders: paymentCounts.Pending || 0,
+        totalReturns: returnRequests.length,
+        pendingReturns: returnRequests.filter(
+          (request) => request.status === "Pending Admin Review"
+        ).length,
+        statusCounts,
+        paymentCounts,
+        couponUsage,
+        topProducts,
+        lowStockProducts,
+      },
+    });
+  } catch (error) {
+    console.error("Admin analytics error:", error.message);
+
+    res.status(500).json({
+      success: false,
+      message: "Unable to fetch admin analytics.",
     });
   }
 });
@@ -930,9 +1104,7 @@ app.put("/api/admin/products/:id", authenticateAdmin, async (req, res) => {
       });
     }
 
-    const updateData = {
-      ...req.body,
-    };
+    const updateData = { ...req.body };
 
     if (req.body.price !== undefined) {
       updateData.price = Number(req.body.price);
@@ -1230,6 +1402,8 @@ connectDatabase()
       console.log(`🧠 Gemini Model: ${GEMINI_MODEL}`);
       console.log("🧾 Order Tracking: Enabled");
       console.log("👤 Customer Dashboard: Enabled");
+      console.log("🏷️ Coupon System: Enabled");
+      console.log("📊 Admin Analytics: Enabled");
       console.log(
         ai
           ? "✅ Gemini AI configured successfully"
