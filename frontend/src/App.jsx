@@ -8,6 +8,7 @@ const emptyCheckoutForm = {
   email: "",
   phone: "",
   address: "",
+  paymentMethod: "Cash on Delivery",
 };
 
 const emptyReturnForm = {
@@ -58,6 +59,14 @@ function App() {
   });
   const [trackedOrder, setTrackedOrder] = useState(null);
 
+  const [paymentForm, setPaymentForm] = useState({
+    orderId: "",
+    email: "",
+    paymentMethod: "Demo UPI Payment",
+  });
+  const [paymentResult, setPaymentResult] = useState(null);
+  const [whatsappResult, setWhatsappResult] = useState(null);
+
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerDashboard, setCustomerDashboard] = useState(null);
 
@@ -102,6 +111,7 @@ function App() {
   const [adminAnalytics, setAdminAnalytics] = useState(null);
   const [adminOrders, setAdminOrders] = useState([]);
   const [adminReturns, setAdminReturns] = useState([]);
+  const [adminWhatsappUpdates, setAdminWhatsappUpdates] = useState({});
   const [newProductForm, setNewProductForm] = useState(emptyNewProductForm);
 
   const [loading, setLoading] = useState(false);
@@ -200,6 +210,29 @@ function App() {
   function resetCoupon() {
     setAppliedCoupon(null);
     setCouponMessage("");
+  }
+
+  async function copyText(text, successMessage = "Copied.") {
+    if (!text) {
+      showMessage("Nothing to copy.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showMessage(successMessage);
+    } catch (error) {
+      showMessage("Copy failed. Please copy manually.");
+    }
+  }
+
+  function openWhatsAppLink(link) {
+    if (!link) {
+      showMessage("WhatsApp link is not available. Add a valid phone number.");
+      return;
+    }
+
+    window.open(link, "_blank", "noopener,noreferrer");
   }
 
   async function fetchProducts() {
@@ -429,6 +462,15 @@ function App() {
           email: checkoutForm.email,
         });
 
+        setPaymentForm({
+          orderId: String(data.order.id),
+          email: checkoutForm.email,
+          paymentMethod: "Demo UPI Payment",
+        });
+
+        setWhatsappResult(data.whatsappUpdate || null);
+        setPaymentResult(null);
+
         setCart([]);
         resetCoupon();
         setCouponCode("");
@@ -464,12 +506,93 @@ function App() {
 
       if (data.success) {
         setTrackedOrder(data);
+        setWhatsappResult(data.whatsappUpdate || null);
+        setPaymentForm({
+          orderId: String(data.order.id),
+          email: data.order.email,
+          paymentMethod: "Demo UPI Payment",
+        });
         showMessage("Order tracking loaded.");
       } else {
         showMessage(data.message || "Order not found.");
       }
     } catch (error) {
       showMessage("Unable to track order.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function completeDemoPayment() {
+    if (!paymentForm.orderId || !paymentForm.email) {
+      showMessage("Order ID and email are required for demo payment.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/payments/demo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(paymentForm),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setPaymentResult(data.payment);
+        setWhatsappResult(data.whatsappUpdate || null);
+
+        setTrackForm({
+          orderId: String(data.payment.orderId),
+          email: paymentForm.email,
+        });
+
+        fetchAdminData(adminToken);
+        showMessage("Demo payment completed successfully.");
+      } else {
+        showMessage(data.message || "Unable to complete demo payment.");
+      }
+    } catch (error) {
+      showMessage("Unable to complete demo payment.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateCustomerWhatsappUpdate() {
+    if (!paymentForm.orderId || !paymentForm.email) {
+      showMessage("Order ID and email are required for WhatsApp update.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        email: paymentForm.email,
+      });
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/orders/${paymentForm.orderId}/whatsapp-update?${params}`
+      );
+      const data = await response.json();
+
+      if (data.success) {
+        setWhatsappResult({
+          message: data.whatsappMessage,
+          link: data.whatsappLink,
+          phoneAvailable: data.phoneAvailable,
+        });
+        showMessage("WhatsApp update generated.");
+      } else {
+        showMessage(data.message || "Unable to generate WhatsApp update.");
+      }
+    } catch (error) {
+      showMessage("Unable to generate WhatsApp update.");
     } finally {
       setLoading(false);
     }
@@ -709,6 +832,7 @@ function App() {
     setAdminAnalytics(null);
     setAdminOrders([]);
     setAdminReturns([]);
+    setAdminWhatsappUpdates({});
     showMessage("Admin logged out.");
   }
 
@@ -752,6 +876,42 @@ function App() {
       }
     } catch (error) {
       showMessage("Unable to load admin data.");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function generateAdminWhatsappUpdate(orderId) {
+    if (!adminToken) {
+      showMessage("Admin login required.");
+      return;
+    }
+
+    setAdminLoading(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/admin/orders/${orderId}/whatsapp-update`,
+        {
+          headers: {
+            Authorization: `Bearer ${adminToken}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        setAdminWhatsappUpdates((current) => ({
+          ...current,
+          [orderId]: data,
+        }));
+        showMessage("Admin WhatsApp update generated.");
+      } else {
+        showMessage(data.message || "Unable to generate WhatsApp update.");
+      }
+    } catch (error) {
+      showMessage("Unable to generate admin WhatsApp update.");
     } finally {
       setAdminLoading(false);
     }
@@ -831,7 +991,7 @@ function App() {
     }
   }
 
-  async function updateOrderStatus(orderId, status, paymentStatus) {
+  async function updateOrderStatus(orderId, status, paymentStatus, paymentMethod) {
     setAdminLoading(true);
 
     try {
@@ -846,6 +1006,7 @@ function App() {
           body: JSON.stringify({
             status,
             paymentStatus,
+            paymentMethod,
           }),
         }
       );
@@ -914,7 +1075,7 @@ function App() {
           <a href="#shop">Shop</a>
           <a href="#outfit-builder">AI Outfit</a>
           <a href="#cart">Cart</a>
-          <a href="#tracking">Track</a>
+          <a href="#payment-tools">Payment</a>
           <a href="#admin">Admin</a>
         </nav>
       </header>
@@ -927,27 +1088,29 @@ function App() {
             <p>
               StyleNexa AI combines a premium streetwear storefront, smart
               product discovery, coupons, order tracking, returns, admin
-              analytics, AI styling, and complete-the-look recommendations.
+              analytics, AI styling, complete-the-look recommendations, demo
+              payments, and WhatsApp order updates.
             </p>
 
             <div className="hero-actions">
               <a href="#shop" className="primary-link">
                 Explore Products
               </a>
-              <a href="#outfit-builder" className="secondary-link">
-                Generate AI Outfit
+              <a href="#payment-tools" className="secondary-link">
+                Payment + WhatsApp
               </a>
             </div>
           </div>
 
           <div className="hero-card">
             <span>Live Features</span>
-            <h3>Phase 2D Active</h3>
+            <h3>Phase 2E Active</h3>
             <ul>
               <li>AI Outfit Builder</li>
               <li>Complete-the-Look</li>
               <li>Coupon Checkout</li>
-              <li>Admin Revenue Analytics</li>
+              <li>Demo Payment Flow</li>
+              <li>WhatsApp Updates</li>
             </ul>
           </div>
         </section>
@@ -1043,10 +1206,10 @@ function App() {
 
         <section id="outfit-builder" className="section-block dark-section">
           <div className="section-heading">
-            <p className="eyebrow">Phase 2D</p>
+            <p className="eyebrow">AI Styling</p>
             <h2>AI Outfit Builder</h2>
             <p>
-              Customers can enter an occasion, style, color, budget, and size.
+              Customers enter an occasion, style, color, budget, and size.
               StyleNexa AI recommends a complete outfit from the catalog.
             </p>
           </div>
@@ -1201,7 +1364,7 @@ function App() {
           <div className="section-heading">
             <p className="eyebrow">Checkout</p>
             <h2>Cart, Coupons & Order</h2>
-            <p>Apply coupons and place discounted orders.</p>
+            <p>Apply coupons, choose payment method, and place orders.</p>
           </div>
 
           <div className="cart-layout">
@@ -1324,7 +1487,25 @@ function App() {
                       phone: event.target.value,
                     })
                   }
+                  placeholder="10-digit phone for WhatsApp update"
                 />
+              </label>
+
+              <label>
+                Payment Method
+                <select
+                  value={checkoutForm.paymentMethod}
+                  onChange={(event) =>
+                    setCheckoutForm({
+                      ...checkoutForm,
+                      paymentMethod: event.target.value,
+                    })
+                  }
+                >
+                  <option value="Cash on Delivery">Cash on Delivery</option>
+                  <option value="Demo UPI Payment">Demo UPI Payment</option>
+                  <option value="Demo Card Payment">Demo Card Payment</option>
+                </select>
               </label>
 
               <label>
@@ -1343,6 +1524,150 @@ function App() {
               <button onClick={placeOrder} disabled={loading}>
                 {loading ? "Processing..." : "Place Order"}
               </button>
+            </div>
+          </div>
+        </section>
+
+        <section id="payment-tools" className="section-block split-section">
+          <div>
+            <div className="section-heading left-heading">
+              <p className="eyebrow">Phase 2E</p>
+              <h2>Demo Payment</h2>
+              <p>Simulate payment completion and generate payment reference.</p>
+            </div>
+
+            <div className="form-card payment-card">
+              <label>
+                Order ID
+                <input
+                  type="text"
+                  value={paymentForm.orderId}
+                  onChange={(event) =>
+                    setPaymentForm({
+                      ...paymentForm,
+                      orderId: event.target.value,
+                    })
+                  }
+                  placeholder="Example: 1"
+                />
+              </label>
+
+              <label>
+                Order Email
+                <input
+                  type="email"
+                  value={paymentForm.email}
+                  onChange={(event) =>
+                    setPaymentForm({
+                      ...paymentForm,
+                      email: event.target.value,
+                    })
+                  }
+                  placeholder="Email used during checkout"
+                />
+              </label>
+
+              <label>
+                Payment Method
+                <select
+                  value={paymentForm.paymentMethod}
+                  onChange={(event) =>
+                    setPaymentForm({
+                      ...paymentForm,
+                      paymentMethod: event.target.value,
+                    })
+                  }
+                >
+                  <option value="Demo UPI Payment">Demo UPI Payment</option>
+                  <option value="Demo Card Payment">Demo Card Payment</option>
+                  <option value="Demo Net Banking">Demo Net Banking</option>
+                </select>
+              </label>
+
+              <button onClick={completeDemoPayment} disabled={loading}>
+                {loading ? "Processing..." : "Complete Demo Payment"}
+              </button>
+
+              <button
+                className="outline-button"
+                onClick={generateCustomerWhatsappUpdate}
+                disabled={loading}
+              >
+                Generate WhatsApp Update
+              </button>
+            </div>
+
+            {paymentResult && (
+              <div className="result-card payment-result-card">
+                <p className="success-badge">Payment Successful</p>
+                <h3>Order #{paymentResult.orderId}</h3>
+                <p>Status: {paymentResult.paymentStatus}</p>
+                <p>Method: {paymentResult.paymentMethod}</p>
+                <p>Reference: {paymentResult.paymentReference}</p>
+                <p>Amount: ₹{paymentResult.finalAmount}</p>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="section-heading left-heading">
+              <p className="eyebrow">WhatsApp</p>
+              <h2>Order Update Message</h2>
+              <p>Copy the message or open WhatsApp directly.</p>
+            </div>
+
+            <div className="whatsapp-box">
+              {!whatsappResult ? (
+                <div className="empty-state light-empty">
+                  <h3>No WhatsApp message yet</h3>
+                  <p>
+                    Place an order, complete demo payment, or generate update
+                    using order ID and email.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="whatsapp-status-row">
+                    <span
+                      className={
+                        whatsappResult.phoneAvailable
+                          ? "success-badge"
+                          : "warning-badge"
+                      }
+                    >
+                      {whatsappResult.phoneAvailable
+                        ? "Phone Available"
+                        : "Phone Missing"}
+                    </span>
+                  </div>
+
+                  <textarea
+                    className="whatsapp-message-area"
+                    value={whatsappResult.message || ""}
+                    readOnly
+                  />
+
+                  <div className="whatsapp-actions">
+                    <button
+                      onClick={() =>
+                        copyText(
+                          whatsappResult.message,
+                          "WhatsApp message copied."
+                        )
+                      }
+                    >
+                      Copy Message
+                    </button>
+
+                    <button
+                      className="outline-button"
+                      onClick={() => openWhatsAppLink(whatsappResult.link)}
+                    >
+                      Open WhatsApp
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </section>
@@ -1391,9 +1716,42 @@ function App() {
                 <h3>Order #{trackedOrder.order.id}</h3>
                 <p>Status: {trackedOrder.tracking.status}</p>
                 <p>Payment: {trackedOrder.tracking.paymentStatus}</p>
+                <p>Payment Method: {trackedOrder.tracking.paymentMethod}</p>
+                <p>
+                  Payment Ref:{" "}
+                  {trackedOrder.tracking.paymentReference || "Not available"}
+                </p>
                 <p>Coupon: {trackedOrder.tracking.couponCode || "No Coupon"}</p>
                 <p>Discount: ₹{trackedOrder.tracking.discountAmount || 0}</p>
                 <p>Final Amount: ₹{trackedOrder.tracking.finalAmount}</p>
+
+                <div className="button-row">
+                  <button
+                    onClick={() =>
+                      setPaymentForm({
+                        orderId: String(trackedOrder.order.id),
+                        email: trackedOrder.order.email,
+                        paymentMethod: "Demo UPI Payment",
+                      })
+                    }
+                  >
+                    Use for Payment
+                  </button>
+
+                  <button
+                    className="outline-button"
+                    onClick={() => {
+                      setPaymentForm({
+                        orderId: String(trackedOrder.order.id),
+                        email: trackedOrder.order.email,
+                        paymentMethod: "Demo UPI Payment",
+                      });
+                      setWhatsappResult(trackedOrder.whatsappUpdate || null);
+                    }}
+                  >
+                    Show WhatsApp
+                  </button>
+                </div>
 
                 <div className="timeline">
                   {trackedOrder.tracking.timeline.map((step) => (
@@ -1446,6 +1804,10 @@ function App() {
                     <strong>{customerDashboard.customer.activeOrders}</strong>
                   </div>
                   <div>
+                    <span>Paid Orders</span>
+                    <strong>{customerDashboard.customer.paidOrders || 0}</strong>
+                  </div>
+                  <div>
                     <span>Total Spent</span>
                     <strong>₹{customerDashboard.customer.totalSpent}</strong>
                   </div>
@@ -1460,6 +1822,7 @@ function App() {
                   <div className="compact-row" key={order.id}>
                     <span>#{order.id}</span>
                     <span>{order.status}</span>
+                    <span>{order.paymentStatus}</span>
                     <strong>₹{order.finalAmount || order.totalAmount}</strong>
                   </div>
                 ))}
@@ -1585,9 +1948,7 @@ function App() {
                   })
                 }
               />
-              <button onClick={generateProductDescription}>
-                Generate Copy
-              </button>
+              <button onClick={generateProductDescription}>Generate Copy</button>
               {productAiReply && <p className="ai-reply">{productAiReply}</p>}
             </div>
           </div>
@@ -1710,7 +2071,7 @@ function App() {
           <div className="section-heading">
             <p className="eyebrow">Business Panel</p>
             <h2>Admin Dashboard</h2>
-            <p>Manage inventory, orders, returns, coupons, and revenue analytics.</p>
+            <p>Manage inventory, orders, returns, payments, WhatsApp updates, and revenue analytics.</p>
           </div>
 
           {!adminToken ? (
@@ -1777,8 +2138,12 @@ function App() {
                     <strong>{adminSummary.totalOrders}</strong>
                   </div>
                   <div>
-                    <span>Revenue</span>
+                    <span>Total Revenue</span>
                     <strong>₹{adminSummary.totalRevenue}</strong>
+                  </div>
+                  <div>
+                    <span>Paid Revenue</span>
+                    <strong>₹{adminSummary.paidRevenue || 0}</strong>
                   </div>
                   <div>
                     <span>Inventory</span>
@@ -1787,10 +2152,6 @@ function App() {
                   <div>
                     <span>Returns</span>
                     <strong>{adminSummary.totalReturnRequests}</strong>
-                  </div>
-                  <div>
-                    <span>Pending Returns</span>
-                    <strong>{adminSummary.pendingReturns}</strong>
                   </div>
                 </div>
               )}
@@ -1813,12 +2174,32 @@ function App() {
                       <strong>₹{adminAnalytics.netRevenue}</strong>
                     </div>
                     <div>
-                      <span>Average Order</span>
-                      <strong>₹{adminAnalytics.averageOrderValue}</strong>
+                      <span>Paid Revenue</span>
+                      <strong>₹{adminAnalytics.paidRevenue || 0}</strong>
+                    </div>
+                    <div>
+                      <span>Paid Orders</span>
+                      <strong>{adminAnalytics.paidOrders || 0}</strong>
+                    </div>
+                    <div>
+                      <span>Pending Payment</span>
+                      <strong>{adminAnalytics.pendingPaymentOrders || 0}</strong>
                     </div>
                   </div>
 
                   <div className="analytics-grid">
+                    <div>
+                      <h4>Payment Methods</h4>
+                      {Object.entries(adminAnalytics.paymentMethodCounts || {}).map(
+                        ([method, count]) => (
+                          <div className="compact-row" key={method}>
+                            <span>{method}</span>
+                            <strong>{count}</strong>
+                          </div>
+                        )
+                      )}
+                    </div>
+
                     <div>
                       <h4>Coupon Usage</h4>
                       {Object.entries(adminAnalytics.couponUsage || {}).map(
@@ -1839,20 +2220,6 @@ function App() {
                           <strong>{product.quantitySold}</strong>
                         </div>
                       ))}
-                    </div>
-
-                    <div>
-                      <h4>Low Stock Alerts</h4>
-                      {(adminAnalytics.lowStockProducts || []).length === 0 ? (
-                        <p className="muted">No low stock products.</p>
-                      ) : (
-                        adminAnalytics.lowStockProducts.map((product) => (
-                          <div className="compact-row" key={product.id}>
-                            <span>{product.name}</span>
-                            <strong>{product.stock}</strong>
-                          </div>
-                        ))
-                      )}
                     </div>
                   </div>
                 </div>
@@ -2001,61 +2368,133 @@ function App() {
               </div>
 
               <div className="admin-table-card">
-                <h3>Orders</h3>
+                <h3>Orders, Payment & WhatsApp</h3>
 
                 {adminOrders.length === 0 ? (
                   <p className="muted">No orders yet.</p>
                 ) : (
-                  adminOrders.map((order) => (
-                    <div className="admin-order-card" key={order.id}>
-                      <div>
-                        <h4>
-                          #{order.id} · {order.customerName}
-                        </h4>
-                        <p>{order.email}</p>
-                        <p>
-                          Cart ₹{order.totalAmount} · Discount ₹
-                          {order.discountAmount || 0} · Final ₹
-                          {order.finalAmount || order.totalAmount}
-                        </p>
-                        <p>Coupon: {order.couponCode || "No Coupon"}</p>
-                      </div>
+                  adminOrders.map((order) => {
+                    const adminWhatsapp = adminWhatsappUpdates[order.id];
 
-                      <div className="status-controls">
-                        <select
-                          value={order.status}
-                          onChange={(event) =>
-                            updateOrderStatus(
-                              order.id,
-                              event.target.value,
-                              order.paymentStatus
-                            )
-                          }
-                        >
-                          <option value="Order Placed">Order Placed</option>
-                          <option value="Processing">Processing</option>
-                          <option value="Shipped">Shipped</option>
-                          <option value="Out for Delivery">
-                            Out for Delivery
-                          </option>
-                          <option value="Delivered">Delivered</option>
-                          <option value="Cancelled">Cancelled</option>
-                        </select>
+                    return (
+                      <div className="admin-order-card" key={order.id}>
+                        <div>
+                          <h4>
+                            #{order.id} · {order.customerName}
+                          </h4>
+                          <p>{order.email}</p>
+                          <p>Phone: {order.phone || "Not available"}</p>
+                          <p>
+                            Cart ₹{order.totalAmount} · Discount ₹
+                            {order.discountAmount || 0} · Final ₹
+                            {order.finalAmount || order.totalAmount}
+                          </p>
+                          <p>Payment: {order.paymentStatus}</p>
+                          <p>Method: {order.paymentMethod || "Not updated"}</p>
+                          <p>Ref: {order.paymentReference || "Not generated"}</p>
+                          <p>Coupon: {order.couponCode || "No Coupon"}</p>
 
-                        <select
-                          value={order.paymentStatus}
-                          onChange={(event) =>
-                            updateOrderStatus(order.id, order.status, event.target.value)
-                          }
-                        >
-                          <option value="Pending">Pending</option>
-                          <option value="Paid">Paid</option>
-                          <option value="Failed">Failed</option>
-                          <option value="Refunded">Refunded</option>
-                        </select>
+                          <div className="whatsapp-actions admin-whatsapp-actions">
+                            <button
+                              onClick={() => generateAdminWhatsappUpdate(order.id)}
+                            >
+                              Generate WhatsApp
+                            </button>
+
+                            {adminWhatsapp && (
+                              <>
+                                <button
+                                  className="outline-button"
+                                  onClick={() =>
+                                    copyText(
+                                      adminWhatsapp.whatsappMessage,
+                                      "Admin WhatsApp message copied."
+                                    )
+                                  }
+                                >
+                                  Copy
+                                </button>
+
+                                <button
+                                  className="outline-button"
+                                  onClick={() =>
+                                    openWhatsAppLink(adminWhatsapp.whatsappLink)
+                                  }
+                                >
+                                  Open WhatsApp
+                                </button>
+                              </>
+                            )}
+                          </div>
+
+                          {adminWhatsapp && (
+                            <textarea
+                              className="whatsapp-message-area admin-whatsapp-textarea"
+                              value={adminWhatsapp.whatsappMessage}
+                              readOnly
+                            />
+                          )}
+                        </div>
+
+                        <div className="status-controls">
+                          <select
+                            value={order.status}
+                            onChange={(event) =>
+                              updateOrderStatus(
+                                order.id,
+                                event.target.value,
+                                order.paymentStatus,
+                                order.paymentMethod
+                              )
+                            }
+                          >
+                            <option value="Order Placed">Order Placed</option>
+                            <option value="Processing">Processing</option>
+                            <option value="Shipped">Shipped</option>
+                            <option value="Out for Delivery">
+                              Out for Delivery
+                            </option>
+                            <option value="Delivered">Delivered</option>
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+
+                          <select
+                            value={order.paymentStatus}
+                            onChange={(event) =>
+                              updateOrderStatus(
+                                order.id,
+                                order.status,
+                                event.target.value,
+                                order.paymentMethod
+                              )
+                            }
+                          >
+                            <option value="Pending">Pending</option>
+                            <option value="Paid">Paid</option>
+                            <option value="Failed">Failed</option>
+                            <option value="Refunded">Refunded</option>
+                          </select>
+
+                          <select
+                            value={order.paymentMethod || "Cash on Delivery"}
+                            onChange={(event) =>
+                              updateOrderStatus(
+                                order.id,
+                                order.status,
+                                order.paymentStatus,
+                                event.target.value
+                              )
+                            }
+                          >
+                            <option value="Cash on Delivery">Cash on Delivery</option>
+                            <option value="Demo UPI Payment">Demo UPI Payment</option>
+                            <option value="Demo Card Payment">Demo Card Payment</option>
+                            <option value="Razorpay Payment">Razorpay Payment</option>
+                          </select>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
